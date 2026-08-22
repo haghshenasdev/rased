@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\HomeController;
+use App\Http\Controllers\NewsController;
 use Illuminate\Support\Facades\Route;
 
 use App\Jobs\CheckSourceJob;
@@ -72,6 +74,12 @@ Route::get('/monitoring/run', function () {
     ]);
 });
 
-Route::get('/', function () {
-    return view('welcome');
-});
+Route::get('/', [
+    HomeController::class,
+    'index'
+])->name('home');
+
+Route::get('/news/{sourceItem}', [
+    NewsController::class,
+    'show'
+])->name('news.show');
