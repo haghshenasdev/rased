@@ -2,6 +2,7 @@
 
 namespace App\Services\Monitoring;
 
+use App\Jobs\SendNewsToBaleJob;
 use App\Models\Source;
 use App\Models\SourceItem;
 use App\Services\Monitoring\Readers\SourceReaderFactory;
@@ -110,7 +111,7 @@ class MonitoringService
                 /*
                  * ذخیره
                  */
-                SourceItem::create([
+                $sourceItem = SourceItem::create([
                     'source_id' => $source->id,
 
                     'external_id' => $item->externalId,
@@ -133,6 +134,13 @@ class MonitoringService
                     'raw_data' =>
                         $item->rawData,
                 ]);
+
+                /*
+ * ارسال خبر جدید به بله
+ */
+                SendNewsToBaleJob::dispatch(
+                    $sourceItem->id
+                );
 
                 $stats['saved']++;
             }
