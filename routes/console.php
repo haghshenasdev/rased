@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
 
 Schedule::command('monitoring:run')
-    ->everyFiveMinutes()
+    ->everyMinute()
     ->withoutOverlapping();
 
 Artisan::command('inspire', function () {

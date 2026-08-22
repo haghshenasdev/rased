@@ -15,6 +15,8 @@ return [
 
     'name' => env('APP_NAME', 'Laravel'),
 
+    'monitoring_secret' => env('MONITORING_SECRET'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Environment

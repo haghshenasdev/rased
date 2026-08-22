@@ -5,6 +5,49 @@ use Illuminate\Support\Facades\Route;
 use App\Jobs\CheckSourceJob;
 use App\Models\Source;
 
+use Illuminate\Support\Facades\Artisan;
+
+Route::get('/cron/monitoring/{token}', function (string $token) {
+
+    if (!hash_equals(
+        (string) config('app.monitoring_secret'),
+        $token
+    )) {
+        abort(403);
+    }
+
+    Artisan::call('monitoring:run');
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Monitoring command executed.',
+        'output' => Artisan::output(),
+    ]);
+});
+
+Route::get('/cron/queue/{token}', function (string $token) {
+
+    if (!hash_equals(
+        (string) config('app.monitoring_secret'),
+        $token
+    )) {
+        abort(403);
+    }
+
+    Artisan::call('queue:work', [
+        'connection' => 'database',
+        '--stop-when-empty' => true,
+        '--max-time' => 50,
+        '--tries' => 2,
+    ]);
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Queue worker executed.',
+        'output' => Artisan::output(),
+    ]);
+});
+
 Route::get('/monitoring/run', function () {
 
     $sources = Source::query()

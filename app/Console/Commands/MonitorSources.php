@@ -10,32 +10,42 @@ class MonitorSources extends Command
 {
     protected $signature = 'monitoring:run';
 
-    protected $description =
-        'بررسی تمام منابع فعال';
+    protected $description = 'ارسال منابعی که بیش از یک ساعت از آخرین بررسی آنها گذشته';
 
     public function handle(): int
     {
+        $limitTime = now()->subHour();
+
         $sources = Source::query()
             ->where('is_active', true)
+            ->where(function ($query) use ($limitTime) {
+
+                $query
+                    ->whereNull('last_read_at')
+                    ->orWhere(
+                        'last_read_at',
+                        '<=',
+                        $limitTime
+                    );
+
+            })
+            ->orderBy('last_read_at')
+            ->limit(50)
             ->get();
 
-        $this->info(
-            "شروع بررسی {$sources->count()} منبع..."
-        );
-
         foreach ($sources as $source) {
-
-            $this->line(
-                "ارسال {$source->name} به صف..."
-            );
 
             CheckSourceJob::dispatch(
                 $source->id
             );
+
+            $this->info(
+                "Job ارسال شد: {$source->name}"
+            );
         }
 
         $this->info(
-            'تمام منابع برای بررسی ارسال شدند.'
+            "{$sources->count()} منبع برای بررسی ارسال شد."
         );
 
         return self::SUCCESS;
