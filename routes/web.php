@@ -9,6 +9,13 @@ use App\Models\Source;
 
 use Illuminate\Support\Facades\Artisan;
 
+use App\Http\Controllers\BaleWebhookController;
+
+Route::post(
+    '/bale/webhook',
+    [BaleWebhookController::class, 'handle']
+);
+
 Route::get('/cron/monitoring/{token}', function (string $token) {
 
     if (!hash_equals(

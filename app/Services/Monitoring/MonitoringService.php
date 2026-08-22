@@ -3,6 +3,7 @@
 namespace App\Services\Monitoring;
 
 use App\Jobs\SendNewsToBaleJob;
+use App\Jobs\SendNewsToBaleSubscribersJob;
 use App\Models\Source;
 use App\Models\SourceItem;
 use App\Services\Monitoring\Readers\SourceReaderFactory;
@@ -138,7 +139,7 @@ class MonitoringService
                 /*
  * ارسال خبر جدید به بله
  */
-                SendNewsToBaleJob::dispatch(
+                SendNewsToBaleSubscribersJob::dispatch(
                     $sourceItem->id
                 );
 

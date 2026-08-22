@@ -190,4 +190,15 @@ class BaleBotService
             $this->getFileUrl($filePath)
         );
     }
+
+    public function setWebhook(
+        string $url
+    ) {
+        return $this->request(
+            'setWebhook',
+            [
+                'url' => $url,
+            ]
+        );
+    }
 }
