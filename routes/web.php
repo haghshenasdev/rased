@@ -16,6 +16,26 @@ Route::post(
     [BaleWebhookController::class, 'handle']
 );
 
+Route::middleware('auth')->get('/bale/set-webhook', function () {
+
+    $bale = app(\App\Services\BaleBotService::class);
+
+    return response()->json(
+        $bale->setWebhook(
+            url('/bale/webhook')
+        )
+    );
+});
+
+Route::middleware('auth')->get('/bale/webhook-info', function () {
+
+    $bale = app(\App\Services\BaleBotService::class);
+
+    return response()->json(
+        $bale->getWebhookInfo()
+    );
+});
+
 Route::get('/cron/monitoring/{token}', function (string $token) {
 
     if (!hash_equals(

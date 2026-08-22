@@ -191,14 +191,29 @@ class BaleBotService
         );
     }
 
-    public function setWebhook(
-        string $url
-    ) {
-        return $this->request(
-            'setWebhook',
-            [
-                'url' => $url,
-            ]
-        );
+    /**
+     * تنظیم Webhook ربات
+     */
+    public function setWebhook(string $url)
+    {
+        return $this->request('setWebhook', [
+            'url' => $url,
+        ]);
+    }
+
+    /**
+     * حذف Webhook
+     */
+    public function deleteWebhook()
+    {
+        return $this->request('deleteWebhook');
+    }
+
+    /**
+     * دریافت وضعیت Webhook
+     */
+    public function getWebhookInfo()
+    {
+        return $this->request('getWebhookInfo');
     }
 }
