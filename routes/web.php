@@ -2,8 +2,6 @@
 
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\NewsController;
-use App\Models\User;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
 
 use App\Jobs\CheckSourceJob;
@@ -114,16 +112,3 @@ Route::get('/news/{sourceItem}', [
 ])->name('news.show');
 
 
-Route::get('/create-admin-temp', function () {
-
-    $user = User::updateOrCreate(
-        ['email' => 'm@m.ir'],
-        [
-            'name' => 'مدیر سیستم',
-            'password' => Hash::make('@123456789'),
-            'email_verified_at' => now(),
-        ]
-    );
-
-    return 'Admin user created. ID: ' . $user->id;
-});
