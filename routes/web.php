@@ -110,3 +110,12 @@ Route::get('/news/{sourceItem}', [
     NewsController::class,
     'show'
 ])->name('news.show');
+
+
+Route::get('/run-migrations-temp', function () {
+    Artisan::call('migrate', [
+        '--force' => true,
+    ]);
+
+    return nl2br(Artisan::output());
+});
