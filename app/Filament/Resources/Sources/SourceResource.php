@@ -363,10 +363,7 @@ class SourceResource extends Resource
 
             ])
 
-            ->defaultSort(
-                'id',
-                'desc'
-            )
+            ->defaultSort('id', 'desc')
 
             ->filters([
                 //
@@ -374,9 +371,6 @@ class SourceResource extends Resource
 
             ->recordActions([
 
-                /*
-                 * بررسی واقعی منبع از طریق Queue
-                 */
                 Action::make('check')
                     ->label('بررسی الآن')
                     ->icon('heroicon-o-arrow-path')
@@ -387,32 +381,63 @@ class SourceResource extends Resource
                         fn ($record) =>
                         "آیا می‌خواهید «{$record->name}» همین الآن بررسی شود؟"
                     )
-                    ->action(
-                        function ($record) {
+                    ->action(function ($record) {
 
-                            \App\Jobs\CheckSourceJob::dispatch(
-                                $record->id
-                            );
+                        \App\Jobs\CheckSourceJob::dispatch(
+                            $record->id
+                        );
 
-                        }
-                    )
+                    })
                     ->successNotificationTitle(
                         'بررسی منبع در صف قرار گرفت'
                     ),
 
-                /*
-                 * ویرایش
-                 */
                 \Filament\Actions\EditAction::make(),
 
-                /*
-                 * حذف
-                 */
                 \Filament\Actions\DeleteAction::make(),
 
             ])
 
             ->toolbarActions([
+
+                /*
+                 * بررسی همه منابع فعال
+                 */
+                \Filament\Actions\Action::make('checkAll')
+                    ->label('بررسی همه منابع')
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('success')
+                    ->requiresConfirmation()
+                    ->modalHeading('بررسی همه منابع')
+                    ->modalDescription(
+                        'همه منابع فعال در صف بررسی قرار خواهند گرفت. آیا ادامه می‌دهید؟'
+                    )
+                    ->action(function () {
+
+                        $sources = \App\Models\Source::query()
+                            ->where('is_active', true)
+                            ->orderBy('id')
+                            ->get();
+
+                        $count = 0;
+
+                        foreach ($sources as $source) {
+
+                            \App\Jobs\CheckSourceJob::dispatch(
+                                $source->id
+                            );
+
+                            $count++;
+                        }
+
+                        \Filament\Notifications\Notification::make()
+                            ->title('منابع در صف قرار گرفتند')
+                            ->body(
+                                "{$count} منبع برای بررسی در صف قرار گرفت."
+                            )
+                            ->success()
+                            ->send();
+                    }),
 
                 \Filament\Actions\BulkActionGroup::make([
                     \Filament\Actions\DeleteBulkAction::make(),
