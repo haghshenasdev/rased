@@ -4,16 +4,21 @@ namespace App\Filament\Resources\Sources;
 
 use App\Filament\Resources\Sources\Pages;
 use App\Models\Source;
+use App\Services\Monitoring\Readers\SourceReaderFactory;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Throwable;
 
 class SourceResource extends Resource
 {
@@ -93,6 +98,220 @@ class SourceResource extends Resource
                     ->label('فعال')
                     ->default(true),
 
+                /*
+                 * دکمه تست خواندن منبع
+                 */
+                Actions::make([
+                    Action::make('testSource')
+                        ->label('تست خواندن منبع')
+                        ->icon('heroicon-o-beaker')
+                        ->color('info')
+                        ->button()
+
+                        ->action(
+                            function (
+                                $livewire,
+                                $get
+                            ) {
+
+                                /*
+                                 * دریافت اطلاعات فعلی فرم
+                                 */
+                                $name = $get('name');
+                                $type = $get('type');
+                                $url = $get('url');
+                                $identifier = $get('identifier');
+
+                                /*
+                                 * بررسی اطلاعات اولیه
+                                 */
+                                if (!$type) {
+
+                                    Notification::make()
+                                        ->title('نوع منبع مشخص نشده است')
+                                        ->body(
+                                            'ابتدا نوع منبع را انتخاب کنید.'
+                                        )
+                                        ->danger()
+                                        ->send();
+
+                                    return;
+                                }
+
+                                if (
+                                    in_array(
+                                        $type,
+                                        ['rss', 'html', 'javascript']
+                                    )
+                                    && !$url
+                                ) {
+
+                                    Notification::make()
+                                        ->title('آدرس منبع وارد نشده است')
+                                        ->body(
+                                            'برای این نوع منبع باید آدرس URL وارد کنید.'
+                                        )
+                                        ->danger()
+                                        ->send();
+
+                                    return;
+                                }
+
+                                if (
+                                    $type === 'eitaa'
+                                    && !$identifier
+                                ) {
+
+                                    Notification::make()
+                                        ->title('شناسه کانال وارد نشده است')
+                                        ->body(
+                                            'شناسه کانال ایتا را وارد کنید.'
+                                        )
+                                        ->danger()
+                                        ->send();
+
+                                    return;
+                                }
+
+                                try {
+
+                                    /*
+                                     * Source موقت
+                                     *
+                                     * هنوز چیزی در دیتابیس ذخیره نمی‌شود.
+                                     */
+                                    $source = new Source();
+
+                                    $source->name =
+                                        $name ?: 'تست منبع';
+
+                                    $source->type =
+                                        $type;
+
+                                    $source->url =
+                                        $url;
+
+                                    $source->identifier =
+                                        $identifier;
+
+                                    $source->is_active =
+                                        true;
+
+                                    /*
+                                     * Reader واقعی پروژه
+                                     */
+                                    $factory =
+                                        app(SourceReaderFactory::class);
+
+                                    $reader =
+                                        $factory->make($source);
+
+                                    /*
+                                     * خواندن واقعی منبع
+                                     */
+                                    $items =
+                                        $reader->read($source);
+
+                                    /*
+                                     * اگر چیزی برنگردد
+                                     */
+                                    if (empty($items)) {
+
+                                        Notification::make()
+                                            ->title(
+                                                'اتصال موفق بود اما مطلبی دریافت نشد'
+                                            )
+                                            ->body(
+                                                'Reader اجرا شد ولی هیچ پستی برای تحلیل برنگرداند.'
+                                            )
+                                            ->warning()
+                                            ->persistent()
+                                            ->send();
+
+                                        return;
+                                    }
+
+                                    /*
+                                     * تعداد مطالب
+                                     */
+                                    $count =
+                                        count($items);
+
+                                    /*
+                                     * نمایش چند مطلب اول
+                                     */
+                                    $preview = '';
+
+                                    foreach (
+                                        array_slice(
+                                            $items,
+                                            0,
+                                            5
+                                        )
+                                        as $index => $item
+                                    ) {
+
+                                        $title =
+                                            $item->title
+                                            ?? 'بدون عنوان';
+
+                                        $externalId =
+                                            $item->externalId
+                                            ?? '-';
+
+                                        $preview .=
+                                            ($index + 1)
+                                            . '. '
+                                            . $title
+                                            . "\n";
+
+                                        $preview .=
+                                            "ID: "
+                                            . $externalId
+                                            . "\n\n";
+                                    }
+
+                                    /*
+                                     * موفقیت
+                                     */
+                                    Notification::make()
+                                        ->title(
+                                            '✅ خواندن منبع موفق بود'
+                                        )
+                                        ->body(
+                                            "تعداد مطالب دریافت‌شده: {$count}\n\n"
+                                            . $preview
+                                        )
+                                        ->success()
+                                        ->persistent()
+                                        ->send();
+
+                                } catch (Throwable $e) {
+
+                                    /*
+                                     * ثبت خطا در Laravel Log
+                                     */
+                                    report($e);
+
+                                    /*
+                                     * نمایش خطا به کاربر
+                                     */
+                                    Notification::make()
+                                        ->title(
+                                            '❌ خطا در خواندن منبع'
+                                        )
+                                        ->body(
+                                            $e->getMessage()
+                                        )
+                                        ->danger()
+                                        ->persistent()
+                                        ->send();
+                                }
+                            }
+                        ),
+                ])
+                    ->columnSpanFull(),
+
             ]);
     }
 
@@ -107,7 +326,7 @@ class SourceResource extends Resource
                     ->sortable(),
 
                 TextColumn::make('type')
-                    ->label('نوع')
+                    ->label('نوع منبع')
                     ->badge()
                     ->formatStateUsing(
                         fn ($state) => match ($state) {
@@ -143,12 +362,22 @@ class SourceResource extends Resource
                     ->sortable(),
 
             ])
-            ->defaultSort('id', 'desc')
+
+            ->defaultSort(
+                'id',
+                'desc'
+            )
+
             ->filters([
                 //
             ])
+
             ->recordActions([
-                \Filament\Actions\Action::make('check')
+
+                /*
+                 * بررسی واقعی منبع از طریق Queue
+                 */
+                Action::make('check')
                     ->label('بررسی الآن')
                     ->icon('heroicon-o-arrow-path')
                     ->color('primary')
@@ -158,32 +387,53 @@ class SourceResource extends Resource
                         fn ($record) =>
                         "آیا می‌خواهید «{$record->name}» همین الآن بررسی شود؟"
                     )
-                    ->action(function ($record) {
+                    ->action(
+                        function ($record) {
 
-                        \App\Jobs\CheckSourceJob::dispatch(
-                            $record->id
-                        );
+                            \App\Jobs\CheckSourceJob::dispatch(
+                                $record->id
+                            );
 
-                    })
+                        }
+                    )
                     ->successNotificationTitle(
                         'بررسی منبع در صف قرار گرفت'
                     ),
+
+                /*
+                 * ویرایش
+                 */
                 \Filament\Actions\EditAction::make(),
+
+                /*
+                 * حذف
+                 */
                 \Filament\Actions\DeleteAction::make(),
+
             ])
+
             ->toolbarActions([
+
                 \Filament\Actions\BulkActionGroup::make([
                     \Filament\Actions\DeleteBulkAction::make(),
                 ]),
+
             ]);
     }
 
     public static function getPages(): array
     {
         return [
-            'index' => Pages\ListSources::route('/'),
-            'create' => Pages\CreateSource::route('/create'),
-            'edit' => Pages\EditSource::route('/{record}/edit'),
+
+            'index' =>
+                Pages\ListSources::route('/'),
+
+            'create' =>
+                Pages\CreateSource::route('/create'),
+
+            'edit' =>
+                Pages\EditSource::route('/{record}/edit'),
+
         ];
     }
 }
