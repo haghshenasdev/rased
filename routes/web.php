@@ -113,9 +113,7 @@ Route::get('/news/{sourceItem}', [
 
 
 Route::get('/run-migrations-temp', function () {
-    Artisan::call('migrate:fresh', [
-        '--force' => true,
-    ]);
+    Artisan::call('migrate:fresh');
 
     return nl2br(Artisan::output());
 });
