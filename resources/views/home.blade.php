@@ -309,7 +309,8 @@
                             rel="noopener noreferrer"
                             class="source-link"
                         >
-                            مشاهده منبع ←
+                            <span>مشاهده منبع</span>
+                            <span class="source-link-arrow">←</span>
                         </a>
 
                     @endif

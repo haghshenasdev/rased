@@ -726,19 +726,52 @@ body {
 }
 
 .source-link {
-    color: #68e8c3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+
+    width: 100%;
+    min-height: 54px;
+
+    padding: 12px 24px;
+
+    border-radius: 14px;
+
+    background: linear-gradient(
+        135deg,
+        #2563eb,
+        #7c3aed
+    );
+
+    color: #fff;
+
+    font-size: 16px;
+    font-weight: 700;
 
     text-decoration: none;
 
-    font-size: 12px;
+    box-shadow:
+        0 8px 20px rgba(37, 99, 235, 0.22);
 
-    font-weight: 700;
-
-    transition: 0.2s;
+    transition:
+        transform 0.2s ease,
+        box-shadow 0.2s ease,
+        opacity 0.2s ease;
 }
 
 .source-link:hover {
-    color: white;
+    transform: translateY(-2px);
+
+    box-shadow:
+        0 12px 28px rgba(37, 99, 235, 0.32);
+
+    opacity: 0.95;
+}
+
+.source-link-arrow {
+    font-size: 21px;
+    line-height: 1;
 }
 
 
