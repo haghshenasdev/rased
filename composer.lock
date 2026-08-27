@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "ff3259e497c16f0e4ad62b3d6f688be1",
+    "content-hash": "8e21261aad3a8ebe6d872545e29b0ea4",
     "packages": [
         {
             "name": "anourvalar/eloquent-serialize",
@@ -70,6 +70,73 @@
                 "source": "https://github.com/AnourValar/eloquent-serialize/tree/1.3.11"
             },
             "time": "2026-08-07T06:14:19+00:00"
+        },
+        {
+            "name": "beberlei/assert",
+            "version": "v3.3.4",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/beberlei/assert.git",
+                "reference": "f193f4613c7d7fbcee2c05e4daff4061d49c040e"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/beberlei/assert/zipball/f193f4613c7d7fbcee2c05e4daff4061d49c040e",
+                "reference": "f193f4613c7d7fbcee2c05e4daff4061d49c040e",
+                "shasum": ""
+            },
+            "require": {
+                "ext-ctype": "*",
+                "ext-json": "*",
+                "ext-mbstring": "*",
+                "ext-simplexml": "*",
+                "php": "^7.1 || ^8.0"
+            },
+            "require-dev": {
+                "friendsofphp/php-cs-fixer": "*",
+                "phpstan/phpstan": "*",
+                "phpunit/phpunit": ">=6.0.0",
+                "yoast/phpunit-polyfills": "^0.1.0"
+            },
+            "suggest": {
+                "ext-intl": "Needed to allow Assertion::count(), Assertion::isCountable(), Assertion::minCount(), and Assertion::maxCount() to operate on ResourceBundles"
+            },
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "lib/Assert/functions.php"
+                ],
+                "psr-4": {
+                    "Assert\\": "lib/Assert"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "BSD-2-Clause"
+            ],
+            "authors": [
+                {
+                    "name": "Benjamin Eberlei",
+                    "email": "kontakt@beberlei.de",
+                    "role": "Lead Developer"
+                },
+                {
+                    "name": "Richard Quadling",
+                    "email": "rquadling@gmail.com",
+                    "role": "Collaborator"
+                }
+            ],
+            "description": "Thin assertion library for input validation in business models.",
+            "keywords": [
+                "assert",
+                "assertion",
+                "validation"
+            ],
+            "support": {
+                "issues": "https://github.com/beberlei/assert/issues",
+                "source": "https://github.com/beberlei/assert/tree/v3.3.4"
+            },
+            "time": "2026-06-10T19:47:05+00:00"
         },
         {
             "name": "blade-ui-kit/blade-heroicons",
@@ -3376,6 +3443,76 @@
             "time": "2026-08-18T06:18:41+00:00"
         },
         {
+            "name": "mokhosh/filament-jalali",
+            "version": "v6.0.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/mokhosh/filament-jalali.git",
+                "reference": "7debf97bf4cb35fc586f85e6d44ce976b9ff02ce"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/mokhosh/filament-jalali/zipball/7debf97bf4cb35fc586f85e6d44ce976b9ff02ce",
+                "reference": "7debf97bf4cb35fc586f85e6d44ce976b9ff02ce",
+                "shasum": ""
+            },
+            "require": {
+                "filament/filament": "^4.0|^5.0",
+                "illuminate/contracts": "^11.28|^12.0|^13.0",
+                "morilog/jalali": "^3.4.2",
+                "php": "^8.2",
+                "spatie/laravel-package-tools": "^1.14.0"
+            },
+            "require-dev": {
+                "laravel/pint": "^1.0",
+                "nunomaduro/collision": "^7.9|^8.0",
+                "orchestra/testbench": "^9.0|^10.0|^11.0",
+                "pestphp/pest": "^3.7|^4.0",
+                "pestphp/pest-plugin-arch": "^3.0|^4.0",
+                "pestphp/pest-plugin-laravel": "^3.0|^4.0"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "aliases": {
+                        "FilamentJalali": "Mokhosh\\FilamentJalali\\Facades\\FilamentJalali"
+                    },
+                    "providers": [
+                        "Mokhosh\\FilamentJalali\\FilamentJalaliServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Mokhosh\\FilamentJalali\\": "src/",
+                    "Mokhosh\\FilamentJalali\\Database\\Factories\\": "database/factories/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Mo Khosh",
+                    "email": "mskhoshnazar@gmail.com",
+                    "role": "Developer"
+                }
+            ],
+            "description": "Add Jalali datetime to your filament tables",
+            "homepage": "https://github.com/mokhosh/filament-jalali",
+            "keywords": [
+                "filament-jalali",
+                "laravel",
+                "mokhosh"
+            ],
+            "support": {
+                "issues": "https://github.com/mokhosh/filament-jalali/issues",
+                "source": "https://github.com/mokhosh/filament-jalali/tree/v6.0.0"
+            },
+            "time": "2026-08-21T09:28:11+00:00"
+        },
+        {
             "name": "monolog/monolog",
             "version": "3.10.0",
             "source": {
@@ -3477,6 +3614,71 @@
                 }
             ],
             "time": "2026-01-02T08:56:05+00:00"
+        },
+        {
+            "name": "morilog/jalali",
+            "version": "v3.5.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/morilog/jalali.git",
+                "reference": "40b906c405b72edd20e73797b40be1e650e872c1"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/morilog/jalali/zipball/40b906c405b72edd20e73797b40be1e650e872c1",
+                "reference": "40b906c405b72edd20e73797b40be1e650e872c1",
+                "shasum": ""
+            },
+            "require": {
+                "beberlei/assert": "^3.0",
+                "nesbot/carbon": "^1.21 || ^2.0 || ^3.0",
+                "php": "^7.1 | ^8.0"
+            },
+            "require-dev": {
+                "phpunit/phpunit": ">4.0"
+            },
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "src/helpers.php"
+                ],
+                "psr-4": {
+                    "Morilog\\Jalali\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Milad Rey",
+                    "email": "miladr@gmail.com"
+                },
+                {
+                    "name": "Morteza Parvini",
+                    "email": "m.parvini@outlook.com"
+                }
+            ],
+            "description": "This Package helps developers to easily work with Jalali (Shamsi or Iranian) dates in PHP applications, based on Jalali (Shamsi) DateTime class.",
+            "keywords": [
+                "Jalali",
+                "date",
+                "datetime",
+                "laravel",
+                "morilog"
+            ],
+            "support": {
+                "issues": "https://github.com/morilog/jalali/issues",
+                "source": "https://github.com/morilog/jalali/tree/v3.5.0"
+            },
+            "funding": [
+                {
+                    "url": "https://issuehunt.io/r/morilog",
+                    "type": "issuehunt"
+                }
+            ],
+            "time": "2025-12-25T07:12:28+00:00"
         },
         {
             "name": "nesbot/carbon",
@@ -11882,7 +12084,9 @@
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {
-        "php": "^8.2"
+        "php": "^8.2",
+        "ext-dom": "*",
+        "ext-simplexml": "*"
     },
     "platform-dev": [],
     "plugin-api-version": "2.3.0"
