@@ -109,6 +109,11 @@ class MonitoringService
                     continue;
                 }
 
+                $storedContent = $this->trimContentAroundKeyword(
+                    content: $item->content ?? '',
+                    keyword: $match['keyword']->word,
+                );
+
                 /*
                  * ذخیره
                  */
@@ -121,7 +126,7 @@ class MonitoringService
 
                     'url' => $item->url,
 
-                    'content' => $item->content,
+                    'content' => $storedContent,
 
                     'matched_content' =>
                         $match['paragraph'],
@@ -218,4 +223,84 @@ class MonitoringService
         return $results;
     }
 
+    protected function trimContentAroundKeyword(
+        string $content,
+        string $keyword,
+        int $maxLength = 10000,
+        int $before = 3500,
+        int $after = 5500,
+    ): string {
+        $content = trim($content);
+        $keyword = trim($keyword);
+
+        if ($content === '') {
+            return '';
+        }
+
+        // متن کوتاه است؛ کل متن ذخیره شود.
+        if (mb_strlen($content) <= $maxLength) {
+            return $content;
+        }
+
+        // پیدا کردن keyword فقط در خود محتوا
+        $position = mb_stripos(
+            $this->normalizeForSearch($content),
+            $this->normalizeForSearch($keyword)
+        );
+
+        // اگر keyword در محتوا نبود:
+        // از ابتدای متن سقف مشخص‌شده را ذخیره کن.
+        if ($position === false) {
+            return trim(
+                    mb_substr($content, 0, $maxLength)
+                ) . "\n\n[...]";
+        }
+
+        // keyword پیدا شده؛ اطراف آن را نگه دار.
+        $start = max(
+            0,
+            $position - $before
+        );
+
+        // اگر به انتهای متن نزدیک بود،
+        // تا جای ممکن مقدار بیشتری از قبل نگه دار.
+        if (
+            $start + $maxLength >
+            mb_strlen($content)
+        ) {
+            $start = max(
+                0,
+                mb_strlen($content) - $maxLength
+            );
+        }
+
+        $result = mb_substr(
+            $content,
+            $start,
+            $maxLength
+        );
+
+        if ($start > 0) {
+            $result = "[...]\n\n" . $result;
+        }
+
+        if (
+            ($start + $maxLength)
+            < mb_strlen($content)
+        ) {
+            $result .= "\n\n[...]";
+        }
+
+        return trim($result);
+    }
+
+    protected function normalizeForSearch(
+        string $text
+    ): string {
+        return str_replace(
+            ['ي', 'ى', 'ك'],
+            ['ی', 'ی', 'ک'],
+            mb_strtolower($text)
+        );
+    }
 }

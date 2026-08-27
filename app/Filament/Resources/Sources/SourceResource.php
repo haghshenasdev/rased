@@ -358,7 +358,23 @@ class SourceResource extends Resource
 
                 TextColumn::make('last_read_at')
                     ->label('آخرین بررسی')
-                    ->dateTime('Y/m/d H:i')
+                    ->formatStateUsing(function ($state) {
+                        if (!$state) {
+                            return 'هنوز بررسی نشده';
+                        }
+
+                        return \Carbon\Carbon::parse($state)
+                            ->locale('fa')
+                            ->diffForHumans();
+                    })
+                    ->description(function ($state) {
+                        if (!$state) {
+                            return null;
+                        }
+
+                        return \Carbon\Carbon::parse($state)
+                            ->format('Y/m/d H:i');
+                    })
                     ->sortable(),
 
             ])

@@ -47,18 +47,51 @@ class SendNewsToBaleJob implements ShouldQueue
             );
         }
 
+        /*
+         * ساخت متن پیام
+         */
         $text = $this->buildMessage($item);
 
-        $result = $bale->sendMessage(
-            $chatId,
-            $text
-        );
+        /*
+         * ارسال پیام با دکمه مشاهده خبر
+         */
+        if ($item->url) {
+
+            $keyboard = $bale->inlineKeyboard([
+                [
+                    $bale->urlButton(
+                        '🔗 مشاهده خبر',
+                        $item->url
+                    ),
+                ],
+            ]);
+
+            $result = $bale->sendWithKeyboard(
+                $chatId,
+                $text,
+                $keyboard
+            );
+
+        } else {
+
+            /*
+             * اگر URL وجود نداشت،
+             * پیام بدون دکمه ارسال می‌شود.
+             */
+            $result = $bale->sendMessage(
+                $chatId,
+                $text
+            );
+        }
 
         /*
          * اگر API بله خطا داد،
          * Job را Failed کن تا دوباره تلاش شود.
          */
-        if (!$result || ($result['ok'] ?? false) !== true) {
+        if (
+            !$result ||
+            ($result['ok'] ?? false) !== true
+        ) {
 
             throw new \Exception(
                 'خطا در ارسال خبر به بله: ' .
@@ -70,6 +103,9 @@ class SendNewsToBaleJob implements ShouldQueue
         }
     }
 
+    /**
+     * ساخت متن خبر
+     */
     private function buildMessage(
         SourceItem $item
     ): string {
@@ -79,16 +115,31 @@ class SendNewsToBaleJob implements ShouldQueue
 
         $text = '';
 
-        $text .= "📰 {$item->title}\n\n";
+        /*
+         * عنوان
+         */
+        $text .= "📰 {$item->title}\n============================\n";
 
+        /*
+         * منبع
+         */
         $text .= "📡 منبع: {$source}\n";
 
+        /*
+         * تاریخ انتشار
+         */
         if ($item->published_at) {
+
             $text .= "🕐 تاریخ: "
-                . $item->published_at->format('Y/m/d H:i')
+                . $item->published_at->format(
+                    'Y/m/d H:i'
+                )
                 . "\n";
         }
 
+        /*
+         * کلمه کلیدی
+         */
         if ($item->matched_keyword) {
 
             $text .= "\n";
@@ -97,22 +148,27 @@ class SendNewsToBaleJob implements ShouldQueue
             $text .= "\n";
         }
 
-        if ($item->matched_content) {
+        /*
+         * بخش مرتبط
+         */
+//        if ($item->matched_content) {
+//
+//            $text .= "\n";
+//            $text .= "📌 بخش مرتبط:\n";
+//            $text .= $item->matched_content;
+//            $text .= "\n";
+//        }
 
-            $text .= "\n";
-            $text .= "📌 بخش مرتبط:\n";
-            $text .= $item->matched_content;
-            $text .= "\n";
-        }
+        /*
+         * توجه:
+         *
+         * لینک را دیگر داخل متن قرار نمی‌دهیم.
+         *
+         * لینک به صورت دکمه Inline Keyboard
+         * در handle() ارسال می‌شود.
+         */
 
-        if ($item->url) {
-
-            $text .= "\n";
-            $text .= "🔗 لینک خبر:\n";
-            $text .= $item->url;
-        }
-
-        $text .= "\n\n";
+        $text .= "\n";
         $text .= "──────\n";
         $text .= "🤖 ارسال شده توسط راصد";
 

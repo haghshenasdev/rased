@@ -148,15 +148,28 @@ class BaleBotService
     }
 
     /**
-     * دکمه اینلاین
+     * دکمه اینلاین با callback
      */
     public function button(
         string $text,
         string $callback
-    ) {
+    ): array {
         return [
             'text' => $text,
             'callback_data' => $callback,
+        ];
+    }
+
+    /**
+     * دکمه اینلاین برای باز کردن URL
+     */
+    public function urlButton(
+        string $text,
+        string $url
+    ): array {
+        return [
+            'text' => $text,
+            'url' => $url,
         ];
     }
 
