@@ -10,6 +10,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Throwable;
 
 class SendNewsToBaleSubscribersJob implements ShouldQueue
 {
@@ -19,6 +20,8 @@ class SendNewsToBaleSubscribersJob implements ShouldQueue
     use SerializesModels;
 
     public int $tries = 3;
+
+    public int $timeout = 60;
 
     public function __construct(
         public int $sourceItemId
@@ -37,24 +40,61 @@ class SendNewsToBaleSubscribersJob implements ShouldQueue
             return;
         }
 
-        $subscribers =
-            BaleSubscriber::query()
-                ->where('is_active', true)
-                ->whereNotNull('chat_id')
-                ->get();
+        $subscribers = BaleSubscriber::query()
+            ->where('is_active', true)
+            ->whereNotNull('chat_id')
+            ->get();
 
         $text = $this->buildMessage($item);
+
+        /*
+         * ساخت دکمه مشاهده خبر
+         */
+        $keyboard = null;
+
+        if ($item->url) {
+
+            $keyboard = $bale->inlineKeyboard([
+                [
+                    $bale->urlButton(
+                        '🔗 مشاهده خبر',
+                        $item->url
+                    ),
+                ],
+            ]);
+        }
 
         foreach ($subscribers as $subscriber) {
 
             try {
 
-                $result =
-                    $bale->sendMessage(
+                /*
+                 * اگر لینک خبر وجود داشته باشد،
+                 * پیام همراه با Inline Keyboard ارسال می‌شود.
+                 */
+                if ($keyboard) {
+
+                    $result = $bale->sendWithKeyboard(
+                        $subscriber->chat_id,
+                        $text,
+                        $keyboard
+                    );
+
+                } else {
+
+                    /*
+                     * اگر URL وجود نداشت،
+                     * پیام بدون دکمه ارسال می‌شود.
+                     */
+                    $result = $bale->sendMessage(
                         $subscriber->chat_id,
                         $text
                     );
+                }
 
+                /*
+                 * ثبت زمان آخرین ارسال موفق
+                 */
                 if (
                     $result &&
                     ($result['ok'] ?? false)
@@ -63,10 +103,30 @@ class SendNewsToBaleSubscribersJob implements ShouldQueue
                     $subscriber->update([
                         'last_sent_at' => now(),
                     ]);
+
+                } else {
+
+                    logger()->error(
+                        'ارسال خبر به مشترک بله ناموفق بود',
+                        [
+                            'subscriber_id' =>
+                                $subscriber->id,
+
+                            'source_item_id' =>
+                                $item->id,
+
+                            'result' =>
+                                $result,
+                        ]
+                    );
                 }
 
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
 
+                /*
+                 * خطای یک مشترک نباید
+                 * ارسال برای مشترک‌های دیگر را متوقف کند.
+                 */
                 logger()->error(
                     'خطا در ارسال خبر به مشترک بله',
                     [
@@ -84,6 +144,9 @@ class SendNewsToBaleSubscribersJob implements ShouldQueue
         }
     }
 
+    /**
+     * ساخت متن پیام خبر
+     */
     private function buildMessage(
         SourceItem $item
     ): string {
@@ -92,12 +155,33 @@ class SendNewsToBaleSubscribersJob implements ShouldQueue
             $item->source?->name
             ?? 'منبع نامشخص';
 
-        $text =
-            "📰 {$item->title}\n\n";
+        $text = '';
 
-        $text .=
-            "📡 منبع: {$source}\n";
+        /*
+         * عنوان خبر
+         */
+        $text .= "📰 {$item->title}\n";
 
+        $text .= "━━━━━━━━━━━━━━━━━━\n";
+
+        /*
+         * اطلاعات خبر
+         */
+        $text .= "📡 منبع: {$source}\n";
+
+        if ($item->published_at) {
+
+            $text .=
+                "🕐 تاریخ انتشار: "
+                . $item->published_at->format(
+                    'Y/m/d H:i'
+                )
+                . "\n";
+        }
+
+        /*
+         * کلمه کلیدی
+         */
         if ($item->matched_keyword) {
 
             $text .=
@@ -106,19 +190,24 @@ class SendNewsToBaleSubscribersJob implements ShouldQueue
                 . "\n";
         }
 
+        /*
+         * بخش مرتبط خبر
+         */
         if ($item->matched_content) {
 
-            $text .=
-                "\n📌 بخش مرتبط:\n"
-                . $item->matched_content
-                . "\n";
+            $text .= "\n";
+            $text .= "📌 بخش مرتبط:\n";
+            $text .= "──────────────\n";
+            $text .= $item->matched_content;
+            $text .= "\n";
         }
 
-        if ($item->url) {
-
-            $text .=
-                "\n🔗 {$item->url}";
-        }
+        /*
+         * فوتر
+         */
+        $text .= "\n";
+        $text .= "━━━━━━━━━━━━━━━━━━\n";
+        $text .= "🤖 رصد شده توسط «راصد»";
 
         return $text;
     }

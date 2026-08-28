@@ -101,12 +101,62 @@ class KeywordMatcher
         return null;
     }
 
+    /**
+     * نرمال‌سازی متن فارسی برای جستجوی Keyword
+     *
+     * مثال:
+     *
+     * حاجی دلیگانی
+     * حاجی‌دلیگانی
+     * حاجیدلیگانی
+     *
+     * هر سه به شکل زیر تبدیل می‌شوند:
+     *
+     * حاجیدلیگانی
+     */
     protected function normalize(string $text): string
     {
-        return str_replace(
+        // حروف را کوچک می‌کنیم
+        $text = mb_strtolower($text, 'UTF-8');
+
+        // یکسان‌سازی حروف عربی و فارسی
+        $text = str_replace(
             ['ي', 'ى', 'ك'],
             ['ی', 'ی', 'ک'],
-            mb_strtolower($text)
+            $text
         );
+
+        /*
+         * حذف نیم‌فاصله
+         * Unicode: U+200C
+         */
+        $text = str_replace(
+            "\u{200C}",
+            '',
+            $text
+        );
+
+        /*
+         * حذف فاصله معمولی
+         *
+         * بنابراین:
+         *
+         * حاجی دلیگانی
+         * حاجی‌دلیگانی
+         * حاجیدلیگانی
+         *
+         * همگی به:
+         *
+         * حاجیدلیگانی
+         *
+         * تبدیل می‌شوند.
+         */
+        $text = preg_replace(
+            '/\s+/u',
+            '',
+            $text
+        );
+
+        return $text ?? '';
     }
 }

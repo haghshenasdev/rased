@@ -272,7 +272,7 @@
 
 
                 <a
-                    href="{{ route('news.show', $item) }}"
+                    href="{{ $item->url ?? '#' }}"
                     class="news-title"
                 >
 

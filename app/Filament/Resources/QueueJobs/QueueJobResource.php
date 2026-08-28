@@ -53,16 +53,16 @@ class QueueJobResource extends Resource
                     ->sortable(),
 
                 Tables\Columns\TextColumn::make('reserved_at')
-                    ->label('در حال اجرا')
+                    ->label('در حال اجرا')->jalaliDateTime()
                     ->dateTime('Y/m/d H:i:s')
                     ->placeholder('در انتظار'),
 
                 Tables\Columns\TextColumn::make('available_at')
-                    ->label('قابل اجرا')
+                    ->label('قابل اجرا')->jalaliDateTime()
                     ->dateTime('Y/m/d H:i:s'),
 
                 Tables\Columns\TextColumn::make('created_at')
-                    ->label('ایجاد')
+                    ->label('ایجاد')->jalaliDateTime()
                     ->dateTime('Y/m/d H:i:s'),
 
             ])
