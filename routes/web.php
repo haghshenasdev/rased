@@ -111,4 +111,15 @@ Route::get('/news/{sourceItem}', [
     'show'
 ])->name('news.show');
 
+Route::get('/clear-cache-temp', function () {
+
+    Artisan::call('optimize:clear');
+
+    return response()->json([
+        'success' => true,
+        'message' => 'تمام کش‌های لاراول پاک شد.',
+        'output' => Artisan::output(),
+    ]);
+});
+
 
