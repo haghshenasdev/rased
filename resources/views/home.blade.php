@@ -1,4 +1,7 @@
 <!DOCTYPE html>
+@php
+    use Morilog\Jalali\Jalalian;
+@endphp
 <html lang="fa" dir="rtl">
 
 <head>
@@ -249,7 +252,9 @@
 
                             <div class="news-time">
 
-                                {{ $item->published_at?->diffForHumans() }}
+                                @if($item->published_at)
+                                    {{ Jalalian::fromCarbon($item->published_at)->ago() }}
+                                @endif
 
                             </div>
 
@@ -296,9 +301,11 @@
 
                     <span class="news-date">
 
-                        {{ $item->published_at?->format('Y/m/d H:i') }}
+    @if($item->published_at)
+                            {{ Jalalian::fromCarbon($item->published_at)->format('Y/m/d H:i') }}
+                        @endif
 
-                    </span>
+</span>
 
 
                     @if($item->url)
