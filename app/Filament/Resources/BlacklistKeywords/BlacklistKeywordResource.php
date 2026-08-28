@@ -65,8 +65,7 @@ class BlacklistKeywordResource extends Resource
                     ->boolean(),
 
                 TextColumn::make('created_at')
-                    ->label('تاریخ ایجاد')->jalaliDateTime()
-                    ->dateTime('Y/m/d H:i')
+                    ->label('تاریخ ایجاد')->jalaliDateTime('Y/m/d H:i')
                     ->sortable(),
 
             ])

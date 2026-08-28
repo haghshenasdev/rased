@@ -44,7 +44,7 @@ class LatestNews extends BaseWidget
                     'published_at'
                 )
                     ->label('انتشار')
-                    ->dateTime('Y/m/d H:i'),
+                    ->jalaliDateTime('Y/m/d H:i'),
 
                 Tables\Columns\TextColumn::make(
                     'created_at'

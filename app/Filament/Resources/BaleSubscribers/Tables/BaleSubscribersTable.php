@@ -40,8 +40,7 @@ class BaleSubscribersTable
                     ->boolean(),
 
                 TextColumn::make('connected_at')
-                    ->label('اتصال')->jalaliDateTime()
-                    ->dateTime('Y/m/d H:i')
+                    ->label('اتصال')->jalaliDateTime('Y/m/d H:i')
                     ->placeholder('—'),
 
                 TextColumn::make('last_sent_at')

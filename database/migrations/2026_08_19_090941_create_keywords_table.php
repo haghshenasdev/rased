@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('keywords', function (Blueprint $table) {
             $table->id();
 
-            $table->integer('priority');
+            $table->integer('priority')->nullable();
 
             $table->string('word');
 

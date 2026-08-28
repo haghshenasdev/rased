@@ -11,6 +11,7 @@ class Keyword extends Model
 
     protected $fillable = [
         'word',
+        'priority',
         'is_active',
     ];
 

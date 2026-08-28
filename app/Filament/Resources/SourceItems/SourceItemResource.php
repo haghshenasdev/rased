@@ -64,13 +64,11 @@ class SourceItemResource extends Resource
                     ->toggleable(),
 
                 TextColumn::make('published_at')
-                    ->label('تاریخ انتشار')->jalaliDateTime()
-                    ->dateTime('Y/m/d H:i')
+                    ->label('تاریخ انتشار')->jalaliDateTime('Y/m/d H:i')
                     ->sortable(),
 
                 TextColumn::make('created_at')
-                    ->label('زمان دریافت')->jalaliDateTime()
-                    ->dateTime('Y/m/d H:i')
+                    ->label('زمان دریافت')->jalaliDateTime('Y/m/d H:i')
                     ->sortable(),
 
             ])
