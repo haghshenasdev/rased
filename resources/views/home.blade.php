@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 @php
     use Morilog\Jalali\Jalalian;
+    use Illuminate\Support\Str;
 @endphp
 <html lang="fa" dir="rtl">
 
@@ -281,7 +282,7 @@
                     class="news-title"
                 >
 
-                    {{ $item->title }}
+                    {{ Str::limit($item->title, 300, '...') }}
 
                 </a>
 
@@ -290,7 +291,7 @@
 
                     <div class="matched-content">
 
-                        {{ $item->matched_content }}
+                        {{ Str::limit($item->matched_content, 300, '...') }}
 
                     </div>
 
