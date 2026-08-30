@@ -15,6 +15,8 @@ class SourceReaderFactory
 
             'eitaa' => app(EitaaReader::class),
 
+            'browser' => app(BrowserReader::class),
+
             default => throw new InvalidArgumentException(
                 "برای نوع منبع [{$source->type}] هنوز Reader ساخته نشده است."
             ),
