@@ -5,28 +5,44 @@ namespace App\Services\Monitoring\Readers;
 use App\Models\Source;
 use App\Services\Monitoring\SourceItemData;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Http;
-use RuntimeException;
-use SimpleXMLElement;
 use DOMDocument;
 use DOMElement;
 use DOMNode;
 use DOMXPath;
+use Illuminate\Support\Facades\Http;
+use RuntimeException;
+use SimpleXMLElement;
 
 class RssReader implements SourceReaderInterface
 {
     /**
-     * حداقل طول متن قابل قبول برای محتوای RSS
+     * حداقل طول متن قابل قبول.
      */
     protected int $minimumContentLength = 100;
 
     /**
-     * حداکثر طول محتوایی که از صفحه خبر می‌خوانیم.
-     *
-     * برای جلوگیری از ذخیره صفحات بسیار بزرگ.
+     * حداکثر طول HTML دریافتی از صفحه خبر.
+     */
+    protected int $maximumHtmlLength = 5000000;
+
+    /**
+     * حداکثر طول متن استخراج‌شده.
      */
     protected int $maximumContentLength = 500000;
 
+    /**
+     * Timeout دریافت RSS.
+     */
+    protected int $rssTimeout = 20;
+
+    /**
+     * Timeout دریافت صفحه خبر.
+     */
+    protected int $articleTimeout = 15;
+
+    /**
+     * اجرای Reader
+     */
     public function read(Source $source): array
     {
         if (empty($source->url)) {
@@ -41,13 +57,14 @@ class RssReader implements SourceReaderInterface
     }
 
     /**
-     * دریافت محتوا از URL
+     * دریافت RSS / Atom
      */
     protected function fetch(string $url): string
     {
-        $response = Http::timeout(30)
+        $response = Http::connectTimeout(10)
+            ->timeout($this->rssTimeout)
             ->withoutVerifying()
-            ->retry(3, 1500)
+            ->retry(3, 1000)
             ->withHeaders([
                 'User-Agent' =>
                     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' .
@@ -55,22 +72,21 @@ class RssReader implements SourceReaderInterface
                     'Chrome/139.0.0.0 Safari/537.36',
 
                 'Accept' =>
-                    'text/html,application/xhtml+xml,' .
-                    'application/xml;q=0.9,*/*;q=0.8',
+                    'application/rss+xml, application/atom+xml, ' .
+                    'application/xml, text/xml, ' .
+                    'text/html;q=0.9, */*;q=0.8',
 
                 'Accept-Language' =>
                     'fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7',
 
                 'Cache-Control' => 'no-cache',
                 'Pragma' => 'no-cache',
-                'Connection' => 'keep-alive',
             ])
             ->get($url);
 
         if (!$response->successful()) {
             throw new RuntimeException(
-                "HTTP {$response->status()} از {$url}\n\n" .
-                $response->body()
+                "HTTP {$response->status()} از {$url}"
             );
         }
 
@@ -78,6 +94,8 @@ class RssReader implements SourceReaderInterface
     }
 
     /**
+     * تشخیص RSS / Atom
+     *
      * @return SourceItemData[]
      */
     protected function parse(string $xml): array
@@ -110,21 +128,27 @@ class RssReader implements SourceReaderInterface
          * RSS 2.0
          */
         if (isset($rss->channel->item)) {
-            return $this->parseRssItems($rss->channel->item);
+            return $this->parseRssItems(
+                $rss->channel->item
+            );
         }
 
         /*
-         * RSS/Feedهایی که item مستقیماً دارند
+         * بعضی Feedها item را مستقیم دارند.
          */
         if (isset($rss->item)) {
-            return $this->parseRssItems($rss->item);
+            return $this->parseRssItems(
+                $rss->item
+            );
         }
 
         /*
          * Atom
          */
         if (isset($rss->entry)) {
-            return $this->parseAtomEntries($rss->entry);
+            return $this->parseAtomEntries(
+                $rss->entry
+            );
         }
 
         throw new RuntimeException(
@@ -133,7 +157,7 @@ class RssReader implements SourceReaderInterface
     }
 
     /**
-     * RSS Items
+     * پردازش RSS Items
      *
      * @param iterable<SimpleXMLElement> $items
      * @return SourceItemData[]
@@ -143,75 +167,102 @@ class RssReader implements SourceReaderInterface
         $result = [];
 
         foreach ($items as $item) {
-            $title = trim((string) $item->title);
-
-            $link = trim((string) $item->link);
-
-            $guid = trim((string) $item->guid);
-
-            $pubDate = trim((string) $item->pubDate);
-
-            /*
-             * پیدا کردن تمام انواع محتوای RSS
-             */
-            $contentData = $this->extractRssContent($item);
-
-            $content = $contentData['content'];
-
-            /*
-             * اگر RSS متن مناسب نداشت،
-             * صفحه اصلی خبر را باز می‌کنیم.
-             */
-            $pageContent = null;
-
-            if (
-                $link &&
-                $this->shouldFetchArticlePage($content)
-            ) {
-                $pageContent = $this->fetchArticleContent(
-                    $link,
-                    $title
+            try {
+                $title = trim(
+                    (string) $item->title
                 );
 
-                if ($pageContent) {
-                    $content = $pageContent;
+                $link = $this->extractRssLink(
+                    $item
+                );
+
+                $guid = trim(
+                    (string) $item->guid
+                );
+
+                $pubDate = trim(
+                    (string) $item->pubDate
+                );
+
+                /*
+                 * محتوای RSS
+                 *
+                 * این محتوا فقط fallback است.
+                 */
+                $contentData =
+                    $this->extractRssContent($item);
+
+                $rssContent =
+                    $contentData['content'];
+
+                /*
+                 * مهم:
+                 *
+                 * اگر لینک وجود داشته باشد،
+                 * همیشه صفحه خبر را باز می‌کنیم.
+                 *
+                 * حتی اگر RSS محتوای کامل داشته باشد.
+                 */
+                $pageContent = null;
+
+                if ($link !== '') {
+                    $pageContent =
+                        $this->fetchArticleContent(
+                            $link,
+                            $title
+                        );
                 }
-            }
 
-            /*
-             * اگر GUID وجود نداشت،
-             * لینک را به عنوان شناسه استفاده می‌کنیم.
-             */
-            $externalId = $guid ?: $link;
+                /*
+                 * اولویت:
+                 *
+                 * 1. متن صفحه خبر
+                 * 2. محتوای RSS
+                 */
+                $content =
+                    $pageContent
+                        ?: $rssContent;
 
-            if (!$externalId) {
-                continue;
-            }
-
-            $publishedAt = null;
-
-            if ($pubDate) {
-                try {
-                    $publishedAt = Carbon::parse($pubDate);
-                } catch (\Throwable) {
-                    $publishedAt = null;
+                /*
+                 * اگر هیچ محتوایی نبود،
+                 * حداقل عنوان را داریم.
+                 */
+                if (!$content) {
+                    $content = $title;
                 }
-            }
 
-            $result[] = new SourceItemData(
-                externalId: $externalId,
-                title: $title,
-                url: $link ?: null,
-                content: $content ?: null,
-                publishedAt: $publishedAt,
-                rawData: [
+                /*
+                 * GUID یا لینک
+                 */
+                $externalId =
+                    $guid ?: $link;
+
+                if (!$externalId) {
+                    continue;
+                }
+
+                /*
+                 * تاریخ انتشار
+                 */
+                $publishedAt = null;
+
+                if ($pubDate !== '') {
+                    try {
+                        $publishedAt =
+                            Carbon::parse($pubDate);
+                    } catch (\Throwable) {
+                        $publishedAt = null;
+                    }
+                }
+
+                /*
+                 * اطلاعات خام
+                 */
+                $rawData = [
                     'guid' => $guid,
+
                     'pubDate' => $pubDate,
 
-                    /*
-                     * نگه داشتن تمام فیلدهای پیدا شده
-                     * برای دیباگ و بررسی بعدی
-                     */
                     'rss_content_source' =>
                         $contentData['source'],
 
@@ -224,17 +275,106 @@ class RssReader implements SourceReaderInterface
                     'summary' =>
                         $contentData['summary'],
 
+                    /*
+                     * آیا صفحه خبر باز شد؟
+                     */
+                    'article_page_requested' =>
+                        $link !== '',
+
+                    /*
+                     * آیا متن صفحه با موفقیت
+                     * استخراج شد؟
+                     */
                     'page_content_loaded' =>
                         $pageContent !== null,
-                ],
-            );
+
+                    /*
+                     * منبع نهایی محتوا
+                     */
+                    'final_content_source' =>
+                        $pageContent !== null
+                            ? 'article_page'
+                            : 'rss',
+                ];
+
+                $result[] = new SourceItemData(
+                    externalId: $externalId,
+                    title: $title,
+                    url: $link ?: null,
+                    content: $content ?: null,
+                    publishedAt: $publishedAt,
+                    rawData: $rawData,
+                );
+
+            } catch (\Throwable $e) {
+                /*
+                 * خراب شدن یک Item نباید باعث شود
+                 * تمام RSS از کار بیفتد.
+                 */
+                logger()->warning(
+                    'خطا در پردازش یک RSS Item',
+                    [
+                        'error' =>
+                            $e->getMessage(),
+
+                        'title' =>
+                            isset($item->title)
+                                ? (string) $item->title
+                                : null,
+                    ]
+                );
+
+                continue;
+            }
         }
 
         return $result;
     }
 
     /**
-     * استخراج محتوای RSS از تمام ساختارهای رایج
+     * استخراج لینک RSS
+     */
+    protected function extractRssLink(
+        SimpleXMLElement $item
+    ): string {
+        /*
+         * حالت معمول:
+         *
+         * <link>https://...</link>
+         */
+        $link = trim(
+            (string) $item->link
+        );
+
+        if ($link !== '') {
+            return $this->normalizeUrl(
+                $link
+            );
+        }
+
+        /*
+         * بعضی RSSها link را با href دارند.
+         */
+        foreach ($item->link as $linkNode) {
+            $attributes =
+                $linkNode->attributes();
+
+            $href = trim(
+                (string) ($attributes['href'] ?? '')
+            );
+
+            if ($href !== '') {
+                return $this->normalizeUrl(
+                    $href
+                );
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * استخراج تمام انواع محتوای RSS
      */
     protected function extractRssContent(
         SimpleXMLElement $item
@@ -248,18 +388,21 @@ class RssReader implements SourceReaderInterface
         /*
          * content:encoded
          */
-        $namespaces = $item->getNameSpaces(true);
+        $namespaces =
+            $item->getNameSpaces(true);
 
         if (isset($namespaces['content'])) {
             try {
-                $contentNode = $item->children(
-                    $namespaces['content']
-                );
+                $contentNode =
+                    $item->children(
+                        $namespaces['content']
+                    );
 
                 if (isset($contentNode->encoded)) {
-                    $contentEncoded = trim(
-                        (string) $contentNode->encoded
-                    );
+                    $contentEncoded =
+                        trim(
+                            (string) $contentNode->encoded
+                        );
                 }
             } catch (\Throwable) {
                 $contentEncoded = '';
@@ -267,19 +410,28 @@ class RssReader implements SourceReaderInterface
         }
 
         /*
-         * بعضی RSSها namespace را با نام متفاوت تعریف می‌کنند.
-         *
-         * بنابراین همه namespaceها را بررسی می‌کنیم.
+         * بررسی سایر namespaceها
          */
-        if (!$contentEncoded && !empty($namespaces)) {
-            foreach ($namespaces as $namespaceName => $namespaceUrl) {
+        if (
+            !$contentEncoded &&
+            !empty($namespaces)
+        ) {
+            foreach (
+                $namespaces
+                as $namespaceName => $namespaceUrl
+            ) {
                 try {
-                    $children = $item->children(
-                        $namespaceUrl
-                    );
+                    $children =
+                        $item->children(
+                            $namespaceUrl
+                        );
 
-                    foreach ($children as $key => $value) {
-                        $key = strtolower((string) $key);
+                    foreach (
+                        $children as $key => $value
+                    ) {
+                        $key = strtolower(
+                            (string) $key
+                        );
 
                         if (
                             in_array(
@@ -288,17 +440,23 @@ class RssReader implements SourceReaderInterface
                                     'encoded',
                                     'content',
                                     'fullcontent',
+                                    'full_content',
                                     'body',
+                                    'article',
+                                    'description',
                                 ],
                                 true
                             )
                         ) {
-                            $valueText = trim(
-                                (string) $value
-                            );
+                            $valueText =
+                                trim(
+                                    (string) $value
+                                );
 
-                            if ($valueText) {
-                                $contentEncoded = $valueText;
+                            if ($valueText !== '') {
+                                $contentEncoded =
+                                    $valueText;
+
                                 break 2;
                             }
                         }
@@ -324,26 +482,34 @@ class RssReader implements SourceReaderInterface
         );
 
         /*
-         * اولویت:
-         *
-         * content:encoded
-         * content
-         * description
-         * summary
+         * اولویت محتوای RSS
          */
         $candidates = [
-            'content_encoded' => $contentEncoded,
-            'content' => $content,
-            'description' => $description,
-            'summary' => $summary,
+            'content_encoded' =>
+                $contentEncoded,
+
+            'content' =>
+                $content,
+
+            'description' =>
+                $description,
+
+            'summary' =>
+                $summary,
         ];
 
-        foreach ($candidates as $source => $value) {
+        /*
+         * بهترین محتوای موجود
+         */
+        foreach (
+            $candidates as $source => $value
+        ) {
             if (!$value) {
                 continue;
             }
 
-            $cleanText = $this->htmlToText($value);
+            $cleanText =
+                $this->htmlToText($value);
 
             if (
                 mb_strlen(
@@ -352,92 +518,385 @@ class RssReader implements SourceReaderInterface
             ) {
                 return [
                     'content' => $value,
+
                     'source' => $source,
 
-                    'description' => $description,
-                    'content_encoded' => $contentEncoded,
-                    'summary' => $summary,
+                    'description' =>
+                        $description,
+
+                    'content_encoded' =>
+                        $contentEncoded,
+
+                    'summary' =>
+                        $summary,
                 ];
             }
         }
 
         /*
-         * حتی اگر متن کوتاه باشد، اولین مقدار موجود را
-         * برمی‌گردانیم.
+         * اگر محتوا کوتاه بود،
+         * اولین مقدار موجود را برگردان.
          */
-        foreach ($candidates as $source => $value) {
+        foreach (
+            $candidates as $source => $value
+        ) {
             if ($value) {
                 return [
                     'content' => $value,
+
                     'source' => $source,
 
-                    'description' => $description,
-                    'content_encoded' => $contentEncoded,
-                    'summary' => $summary,
+                    'description' =>
+                        $description,
+
+                    'content_encoded' =>
+                        $contentEncoded,
+
+                    'summary' =>
+                        $summary,
                 ];
             }
         }
 
         return [
             'content' => '',
+
             'source' => null,
 
-            'description' => $description,
-            'content_encoded' => $contentEncoded,
-            'summary' => $summary,
+            'description' =>
+                $description,
+
+            'content_encoded' =>
+                $contentEncoded,
+
+            'summary' =>
+                $summary,
         ];
     }
 
     /**
-     * تشخیص اینکه آیا باید صفحه خبر را باز کنیم یا نه.
+     * Atom Entries
+     *
+     * @param iterable<SimpleXMLElement> $entries
+     * @return SourceItemData[]
      */
-    protected function shouldFetchArticlePage(
-        ?string $content
-    ): bool {
-        if (!$content) {
-            return true;
+    protected function parseAtomEntries(
+        iterable $entries
+    ): array {
+        $result = [];
+
+        foreach ($entries as $entry) {
+            try {
+                $title = trim(
+                    (string) $entry->title
+                );
+
+                $link =
+                    $this->extractAtomLink(
+                        $entry
+                    );
+
+                $id = trim(
+                    (string) $entry->id
+                );
+
+                $published =
+                    trim(
+                        (string) (
+                        $entry->published
+                            ?: $entry->updated
+                        )
+                    );
+
+                /*
+                 * محتوای Atom
+                 */
+                $contentData =
+                    $this->extractAtomContent(
+                        $entry
+                    );
+
+                $rssContent =
+                    $contentData['content'];
+
+                /*
+                 * مهم:
+                 *
+                 * برای Atom نیز همیشه صفحه خبر
+                 * باز می‌شود.
+                 */
+                $pageContent = null;
+
+                if ($link !== '') {
+                    $pageContent =
+                        $this->fetchArticleContent(
+                            $link,
+                            $title
+                        );
+                }
+
+                /*
+                 * اولویت:
+                 *
+                 * صفحه خبر
+                 * سپس Atom
+                 */
+                $content =
+                    $pageContent
+                        ?: $rssContent;
+
+                if (!$content) {
+                    $content = $title;
+                }
+
+                $externalId =
+                    $id ?: $link;
+
+                if (!$externalId) {
+                    continue;
+                }
+
+                $publishedAt = null;
+
+                if ($published !== '') {
+                    try {
+                        $publishedAt =
+                            Carbon::parse(
+                                $published
+                            );
+                    } catch (\Throwable) {
+                        $publishedAt = null;
+                    }
+                }
+
+                $result[] =
+                    new SourceItemData(
+                        externalId:
+                        $externalId,
+
+                        title:
+                        $title,
+
+                        url:
+                        $link ?: null,
+
+                        content:
+                        $content ?: null,
+
+                        publishedAt:
+                        $publishedAt,
+
+                        rawData: [
+                            'id' => $id,
+
+                            'published' =>
+                                $published,
+
+                            'atom_content_source' =>
+                                $contentData['source'],
+
+                            'summary' =>
+                                $contentData['summary'],
+
+                            'page_content_loaded' =>
+                                $pageContent !== null,
+
+                            'article_page_requested' =>
+                                $link !== '',
+
+                            'final_content_source' =>
+                                $pageContent !== null
+                                    ? 'article_page'
+                                    : 'atom',
+                        ],
+                    );
+
+            } catch (\Throwable $e) {
+                logger()->warning(
+                    'خطا در پردازش Atom Entry',
+                    [
+                        'error' =>
+                            $e->getMessage(),
+                    ]
+                );
+
+                continue;
+            }
         }
 
-        $text = $this->htmlToText($content);
-
-        /*
-         * اگر متن RSS خیلی کوتاه باشد،
-         * احتمالاً فقط خلاصه خبر است.
-         */
-        if (
-            mb_strlen(trim($text))
-            < $this->minimumContentLength
-        ) {
-            return true;
-        }
-
-        /*
-         * اگر متن فقط چند کلمه باشد.
-         */
-        $wordCount = preg_match_all(
-            '/\S+/u',
-            $text,
-            $matches
-        );
-
-        if ($wordCount !== false && $wordCount < 20) {
-            return true;
-        }
-
-        return false;
+        return $result;
     }
 
     /**
-     * باز کردن صفحه اصلی خبر و پیدا کردن متن خبر
+     * استخراج لینک Atom
+     */
+    protected function extractAtomLink(
+        SimpleXMLElement $entry
+    ): string {
+        /*
+         * namespaceهای Atom
+         */
+        $namespaces =
+            $entry->getNameSpaces(true);
+
+        /*
+         * حالت استاندارد:
+         *
+         * <link href="..." />
+         */
+        foreach ($entry->link as $link) {
+            $attributes =
+                $link->attributes();
+
+            $href = trim(
+                (string) ($attributes['href'] ?? '')
+            );
+
+            if ($href === '') {
+                continue;
+            }
+
+            $rel = strtolower(
+                trim(
+                    (string) (
+                        $attributes['rel'] ?? ''
+                    )
+                )
+            );
+
+            /*
+             * لینک اصلی مقاله
+             */
+            if (
+                $rel === '' ||
+                $rel === 'alternate'
+            ) {
+                return $this->normalizeUrl(
+                    $href
+                );
+            }
+        }
+
+        /*
+         * بعضی Feedها link را به صورت
+         * متن قرار می‌دهند.
+         */
+        $textLink = trim(
+            (string) $entry->link
+        );
+
+        if ($textLink !== '') {
+            return $this->normalizeUrl(
+                $textLink
+            );
+        }
+
+        return '';
+    }
+
+    /**
+     * استخراج محتوای Atom
+     */
+    protected function extractAtomContent(
+        SimpleXMLElement $entry
+    ): array {
+        $content = '';
+
+        $summary = trim(
+            (string) ($entry->summary ?? '')
+        );
+
+        /*
+         * Atom content
+         */
+        if (isset($entry->content)) {
+            $content =
+                trim(
+                    (string) $entry->content
+                );
+        }
+
+        /*
+         * اولویت content نسبت به summary
+         */
+        if ($content !== '') {
+            return [
+                'content' =>
+                    $content,
+
+                'source' =>
+                    'content',
+
+                'summary' =>
+                    $summary,
+            ];
+        }
+
+        if ($summary !== '') {
+            return [
+                'content' =>
+                    $summary,
+
+                'source' =>
+                    'summary',
+
+                'summary' =>
+                    $summary,
+            ];
+        }
+
+        return [
+            'content' =>
+                '',
+
+            'source' =>
+                null,
+
+            'summary' =>
+                $summary,
+        ];
+    }
+
+    /**
+     * باز کردن صفحه خبر
+     *
+     * این متد برای هر خبر جدیدی که لینک دارد
+     * فراخوانی می‌شود.
      */
     protected function fetchArticleContent(
         string $url,
         string $title = ''
     ): ?string {
         try {
-            $response = Http::timeout(30)
+            $url = $this->normalizeUrl(
+                $url
+            );
+
+            if ($url === '') {
+                return null;
+            }
+
+            logger()->debug(
+                'باز کردن صفحه خبر RSS',
+                [
+                    'url' => $url,
+                    'title' => $title,
+                ]
+            );
+
+            $response = Http::connectTimeout(8)
+                ->timeout($this->articleTimeout)
                 ->withoutVerifying()
-                ->retry(2, 1000)
+                ->retry(
+                    2,
+                    800,
+                    function (
+                        $exception,
+                        $request
+                    ) {
+                        return true;
+                    }
+                )
                 ->withHeaders([
                     'User-Agent' =>
                         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' .
@@ -446,49 +905,115 @@ class RssReader implements SourceReaderInterface
 
                     'Accept' =>
                         'text/html,application/xhtml+xml,' .
-                        'application/xml;q=0.9,*/*;q=0.8',
+                        'application/xml;q=0.9,' .
+                        '*/*;q=0.8',
 
                     'Accept-Language' =>
                         'fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7',
+
+                    'Cache-Control' =>
+                        'no-cache',
+
+                    'Pragma' =>
+                        'no-cache',
                 ])
                 ->get($url);
 
             if (!$response->successful()) {
+                logger()->warning(
+                    'صفحه خبر قابل دریافت نیست',
+                    [
+                        'url' =>
+                            $url,
+
+                        'status' =>
+                            $response->status(),
+                    ]
+                );
+
                 return null;
             }
 
-            $html = $response->body();
+            $html =
+                $response->body();
 
             if (!$html) {
                 return null;
             }
 
-            return $this->extractArticleFromHtml(
-                $html,
-                $title
-            );
-        } catch (\Throwable) {
             /*
-             * خراب شدن یک صفحه نباید باعث شود
-             * کل خواندن RSS متوقف شود.
+             * جلوگیری از پردازش HTML بسیار بزرگ
              */
+            if (
+                strlen($html) >
+                $this->maximumHtmlLength
+            ) {
+                $html =
+                    substr(
+                        $html,
+                        0,
+                        $this->maximumHtmlLength
+                    );
+            }
+
+            $content =
+                $this->extractArticleFromHtml(
+                    $html,
+                    $title
+                );
+
+            if ($content === null) {
+                logger()->debug(
+                    'محتوای اصلی صفحه خبر پیدا نشد',
+                    [
+                        'url' =>
+                            $url,
+                    ]
+                );
+            }
+
+            return $content;
+
+        } catch (\Throwable $e) {
+            /*
+             * شکست یک صفحه نباید باعث شود
+             * کل RSS متوقف شود.
+             */
+            logger()->warning(
+                'خطا در باز کردن صفحه خبر RSS',
+                [
+                    'url' =>
+                        $url,
+
+                    'title' =>
+                        $title,
+
+                    'error' =>
+                        $e->getMessage(),
+                ]
+            );
+
             return null;
         }
     }
 
     /**
-     * پیدا کردن محتوای اصلی خبر از HTML
+     * استخراج محتوای اصلی خبر از HTML
      */
     protected function extractArticleFromHtml(
         string $html,
         string $title = ''
     ): ?string {
+        if (trim($html) === '') {
+            return null;
+        }
+
         libxml_use_internal_errors(true);
 
         $dom = new DOMDocument();
 
         /*
-         * UTF-8
+         * تضمین UTF-8
          */
         $htmlForDom =
             '<?xml encoding="UTF-8">' .
@@ -507,10 +1032,11 @@ class RssReader implements SourceReaderInterface
             return null;
         }
 
-        $xpath = new DOMXPath($dom);
+        $xpath =
+            new DOMXPath($dom);
 
         /*
-         * تگ‌هایی که تقریباً هیچ وقت بخشی از متن خبر نیستند.
+         * حذف عناصر غیرمتنی
          */
         $removeTags = [
             'script',
@@ -530,196 +1056,486 @@ class RssReader implements SourceReaderInterface
             'textarea',
             'video',
             'audio',
+            'source',
             'figure',
             'figcaption',
+            'template',
+            'object',
+            'embed',
         ];
 
         foreach ($removeTags as $tag) {
-            $nodes = $dom->getElementsByTagName($tag);
+            $nodes =
+                $dom->getElementsByTagName(
+                    $tag
+                );
 
             /*
-             * چون NodeList زنده است، از آخر حذف می‌کنیم.
+             * NodeList زنده است؛ از آخر حذف می‌کنیم.
              */
-            for ($i = $nodes->length - 1; $i >= 0; $i--) {
-                $node = $nodes->item($i);
+            for (
+                $i = $nodes->length - 1;
+                $i >= 0;
+                $i--
+            ) {
+                $node =
+                    $nodes->item($i);
 
-                if ($node?->parentNode) {
-                    $node->parentNode->removeChild($node);
+                if (
+                    $node &&
+                    $node->parentNode
+                ) {
+                    $node->parentNode
+                        ->removeChild($node);
                 }
             }
         }
 
         /*
-         * ابتدا ساختارهای بسیار واضح را امتحان می‌کنیم.
+         * حذف لینک‌های ناخواسته،
+         * منوها و عناصر تبلیغاتی بر اساس
+         * class/id.
+         */
+        $this->removeNoiseNodes(
+            $xpath,
+            $dom
+        );
+
+        /*
+         * ---------------------------------
+         * مرحله ۱
+         * JSON-LD
+         * ---------------------------------
+         */
+        $jsonLdContent =
+            $this->extractJsonLdArticleBody(
+                $xpath
+            );
+
+        if (
+            $jsonLdContent &&
+            $this->isValidArticleContent(
+                $jsonLdContent
+            )
+        ) {
+            return $this->limitContent(
+                $jsonLdContent
+            );
+        }
+
+        /*
+         * ---------------------------------
+         * مرحله ۲
+         * تگ article
+         * ---------------------------------
+         */
+        $articleNodes =
+            $xpath->query(
+                '//article'
+            );
+
+        if (
+            $articleNodes !== false &&
+            $articleNodes->length > 0
+        ) {
+            $best = null;
+            $bestLength = 0;
+
+            foreach ($articleNodes as $node) {
+                $text =
+                    $this->nodeToText(
+                        $node
+                    );
+
+                $length =
+                    mb_strlen(
+                        trim($text)
+                    );
+
+                if (
+                    $length >
+                    $bestLength
+                ) {
+                    $bestLength =
+                        $length;
+
+                    $best =
+                        $text;
+                }
+            }
+
+            if (
+                $best &&
+                $this->isValidArticleContent(
+                    $best
+                )
+            ) {
+                return $this->limitContent(
+                    $best
+                );
+            }
+        }
+
+        /*
+         * ---------------------------------
+         * مرحله ۳
+         * main
+         * ---------------------------------
+         */
+        $mainNodes =
+            $xpath->query(
+                '//main'
+            );
+
+        if (
+            $mainNodes !== false &&
+            $mainNodes->length > 0
+        ) {
+            $best = null;
+            $bestLength = 0;
+
+            foreach ($mainNodes as $node) {
+                $text =
+                    $this->nodeToText(
+                        $node
+                    );
+
+                $length =
+                    mb_strlen(
+                        trim($text)
+                    );
+
+                if (
+                    $length >
+                    $bestLength
+                ) {
+                    $bestLength =
+                        $length;
+
+                    $best =
+                        $text;
+                }
+            }
+
+            if (
+                $best &&
+                $this->isValidArticleContent(
+                    $best
+                )
+            ) {
+                return $this->limitContent(
+                    $best
+                );
+            }
+        }
+
+        /*
+         * ---------------------------------
+         * مرحله ۴
+         * selectorهای رایج سایت‌های خبری
+         * ---------------------------------
          */
         $selectors = [
-            '//article',
-            '//main',
+            /*
+             * کلاس‌ها
+             */
+            '//*[contains(
+                translate(
+                    @class,
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "abcdefghijklmnopqrstuvwxyz"
+                ),
+                "article-body"
+            )]',
+
+            '//*[contains(
+                translate(
+                    @class,
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "abcdefghijklmnopqrstuvwxyz"
+                ),
+                "article-content"
+            )]',
+
+            '//*[contains(
+                translate(
+                    @class,
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "abcdefghijklmnopqrstuvwxyz"
+                ),
+                "post-content"
+            )]',
+
+            '//*[contains(
+                translate(
+                    @class,
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "abcdefghijklmnopqrstuvwxyz"
+                ),
+                "entry-content"
+            )]',
+
+            '//*[contains(
+                translate(
+                    @class,
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "abcdefghijklmnopqrstuvwxyz"
+                ),
+                "news-content"
+            )]',
+
+            '//*[contains(
+                translate(
+                    @class,
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "abcdefghijklmnopqrstuvwxyz"
+                ),
+                "news-body"
+            )]',
+
+            '//*[contains(
+                translate(
+                    @class,
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "abcdefghijklmnopqrstuvwxyz"
+                ),
+                "article-text"
+            )]',
+
+            '//*[contains(
+                translate(
+                    @class,
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "abcdefghijklmnopqrstuvwxyz"
+                ),
+                "article-detail"
+            )]',
+
+            '//*[contains(
+                translate(
+                    @class,
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "abcdefghijklmnopqrstuvwxyz"
+                ),
+                "detail-content"
+            )]',
+
+            '//*[contains(
+                translate(
+                    @class,
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "abcdefghijklmnopqrstuvwxyz"
+                ),
+                "story-body"
+            )]',
+
+            '//*[contains(
+                translate(
+                    @class,
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "abcdefghijklmnopqrstuvwxyz"
+                ),
+                "content-body"
+            )]',
 
             /*
-             * کلاس‌های رایج محتوای خبر
+             * ID
              */
-            "//*[contains(translate(@class,
-                'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-                'abcdefghijklmnopqrstuvwxyz'),
-                'article-content')]",
+            '//*[contains(
+                translate(
+                    @id,
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "abcdefghijklmnopqrstuvwxyz"
+                ),
+                "article"
+            )]',
 
-            "//*[contains(translate(@class,
-                'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-                'abcdefghijklmnopqrstuvwxyz'),
-                'article-body')]",
+            '//*[contains(
+                translate(
+                    @id,
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "abcdefghijklmnopqrstuvwxyz"
+                ),
+                "content"
+            )]',
 
-            "//*[contains(translate(@class,
-                'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-                'abcdefghijklmnopqrstuvwxyz'),
-                'post-content')]",
-
-            "//*[contains(translate(@class,
-                'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-                'abcdefghijklmnopqrstuvwxyz'),
-                'entry-content')]",
-
-            "//*[contains(translate(@class,
-                'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-                'abcdefghijklmnopqrstuvwxyz'),
-                'news-content')]",
-
-            "//*[contains(translate(@class,
-                'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-                'abcdefghijklmnopqrstuvwxyz'),
-                'news-body')]",
-
-            "//*[contains(translate(@class,
-                'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-                'abcdefghijklmnopqrstuvwxyz'),
-                'content-body')]",
-
-            "//*[contains(translate(@class,
-                'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-                'abcdefghijklmnopqrstuvwxyz'),
-                'article-text')]",
-
-            "//*[contains(translate(@class,
-                'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-                'abcdefghijklmnopqrstuvwxyz'),
-                'post-body')]",
+            '//*[contains(
+                translate(
+                    @id,
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    "abcdefghijklmnopqrstuvwxyz"
+                ),
+                "news"
+            )]',
         ];
 
-        $bestCandidate = null;
+        $best = null;
         $bestScore = 0;
 
         foreach ($selectors as $selector) {
-            try {
-                $nodes = $xpath->query($selector);
+            $nodes =
+                @$xpath->query(
+                    $selector
+                );
 
-                if (!$nodes) {
+            if (
+                $nodes === false ||
+                $nodes->length === 0
+            ) {
+                continue;
+            }
+
+            foreach ($nodes as $node) {
+                $text =
+                    $this->nodeToText(
+                        $node
+                    );
+
+                $text =
+                    trim($text);
+
+                if (
+                    !$this->isValidArticleContent(
+                        $text
+                    )
+                ) {
                     continue;
                 }
 
-                foreach ($nodes as $node) {
-                    if (!$node instanceof DOMNode) {
-                        continue;
-                    }
-
-                    $text = $this->nodeToText($node);
-
-                    $score = $this->scoreArticleCandidate(
+                $score =
+                    $this->scoreContentNode(
                         $node,
                         $text,
                         $title
                     );
 
-                    if ($score > $bestScore) {
-                        $bestScore = $score;
-                        $bestCandidate = $node;
-                    }
+                if (
+                    $score >
+                    $bestScore
+                ) {
+                    $bestScore =
+                        $score;
+
+                    $best =
+                        $text;
                 }
-            } catch (\Throwable) {
-                continue;
             }
         }
 
+        if (
+            $best &&
+            $this->isValidArticleContent(
+                $best
+            )
+        ) {
+            return $this->limitContent(
+                $best
+            );
+        }
+
         /*
-         * اگر article/main پیدا شد، همان را استفاده می‌کنیم.
+         * ---------------------------------
+         * مرحله ۵
+         * پیدا کردن بهترین div
+         * ---------------------------------
          */
-        if ($bestCandidate) {
-            $text = $this->nodeToText(
-                $bestCandidate
+        $divNodes =
+            $xpath->query(
+                '//div'
             );
 
-            if (
-                mb_strlen(trim($text))
-                >= $this->minimumContentLength
-            ) {
-                return $this->limitContent(
-                    $text
-                );
-            }
-        }
+        if (
+            $divNodes !== false
+        ) {
+            $best = null;
+            $bestScore = 0;
 
-        /*
-         * اگر ساختار مشخص نبود،
-         * بین تمام divها دنبال بهترین کاندید می‌گردیم.
-         */
-        $divs = $xpath->query('//div');
+            foreach ($divNodes as $node) {
+                /*
+                 * فقط divهایی که تعداد مناسبی
+                 * متن دارند.
+                 */
+                $text =
+                    $this->nodeToText(
+                        $node
+                    );
 
-        if ($divs) {
-            foreach ($divs as $div) {
-                if (!$div instanceof DOMElement) {
-                    continue;
-                }
+                $text =
+                    trim($text);
 
-                $text = $this->nodeToText($div);
+                $length =
+                    mb_strlen($text);
 
                 if (
-                    mb_strlen(trim($text))
-                    < $this->minimumContentLength
+                    $length <
+                    $this->minimumContentLength
                 ) {
                     continue;
                 }
 
-                $score = $this->scoreArticleCandidate(
-                    $div,
-                    $text,
-                    $title
-                );
+                /*
+                 * divهای بسیار بزرگ معمولاً
+                 * container کل سایت هستند.
+                 */
+                if ($length > 200000) {
+                    continue;
+                }
 
-                if ($score > $bestScore) {
-                    $bestScore = $score;
-                    $bestCandidate = $div;
+                $score =
+                    $this->scoreContentNode(
+                        $node,
+                        $text,
+                        $title
+                    );
+
+                if (
+                    $score >
+                    $bestScore
+                ) {
+                    $bestScore =
+                        $score;
+
+                    $best =
+                        $text;
                 }
             }
-        }
-
-        if ($bestCandidate) {
-            $text = $this->nodeToText(
-                $bestCandidate
-            );
 
             if (
-                mb_strlen(trim($text))
-                >= $this->minimumContentLength
+                $best &&
+                $this->isValidArticleContent(
+                    $best
+                )
             ) {
                 return $this->limitContent(
-                    $text
+                    $best
                 );
             }
         }
 
         /*
-         * آخرین fallback:
-         * کل body
+         * ---------------------------------
+         * مرحله ۶
+         * fallback کل body
+         * ---------------------------------
          */
-        $body = $xpath->query('//body');
-
-        if ($body && $body->length > 0) {
-            $text = $this->nodeToText(
-                $body->item(0)
+        $bodyNodes =
+            $xpath->query(
+                '//body'
             );
 
+        if (
+            $bodyNodes !== false &&
+            $bodyNodes->length > 0
+        ) {
+            $text =
+                $this->nodeToText(
+                    $bodyNodes->item(0)
+                );
+
             if (
-                mb_strlen(trim($text))
-                >= $this->minimumContentLength
+                $this->isValidArticleContent(
+                    $text
+                )
             ) {
                 return $this->limitContent(
                     $text
@@ -731,136 +1547,240 @@ class RssReader implements SourceReaderInterface
     }
 
     /**
-     * امتیازدهی به یک node برای تشخیص اینکه
-     * محتوای اصلی خبر است یا نه.
+     * حذف عناصر تبلیغاتی و غیرمفید
      */
-    protected function scoreArticleCandidate(
-        DOMNode $node,
-        string $text,
-        string $title = ''
-    ): int {
-        $length = mb_strlen(
-            trim($text)
-        );
-
-        if ($length < $this->minimumContentLength) {
-            return 0;
-        }
-
+    protected function removeNoiseNodes(
+        DOMXPath $xpath,
+        DOMDocument $dom
+    ): void {
         /*
-         * طول متن امتیاز مثبت دارد.
+         * XPath برای class و id.
          */
-        $score = min(
-            500,
-            (int) ($length / 100)
-        );
+        $patterns = [
+            'advert',
+            'advertisement',
+            'ads',
+            'ad-container',
+            'banner',
+            'popup',
+            'modal',
+            'cookie',
+            'social',
+            'share',
+            'related',
+            'recommend',
+            'recommended',
+            'sidebar',
+            'breadcrumb',
+            'comments',
+            'comment',
+            'navigation',
+            'menu',
+            'footer',
+            'header',
+            'telegram',
+            'instagram',
+            'twitter',
+            'facebook',
+        ];
 
-        if ($node instanceof DOMElement) {
-            $class = strtolower(
-                $node->getAttribute('class')
-            );
+        foreach ($patterns as $pattern) {
+            $patternLower =
+                strtolower($pattern);
 
-            $id = strtolower(
-                $node->getAttribute('id')
-            );
+            $query =
+                '//*[contains(' .
+                'translate(@class,' .
+                '"ABCDEFGHIJKLMNOPQRSTUVWXYZ",' .
+                '"abcdefghijklmnopqrstuvwxyz"' .
+                '), ' .
+                '"' . $patternLower . '"' .
+                ')]';
 
-            $identifier =
-                $class . ' ' . $id;
+            $nodes =
+                @$xpath->query(
+                    $query
+                );
 
-            /*
-             * کلمات مثبت
-             */
-            $positiveWords = [
-                'article',
-                'content',
-                'post',
-                'news',
-                'story',
-                'entry',
-                'body',
-                'main',
-                'text',
-            ];
-
-            foreach ($positiveWords as $word) {
-                if (
-                    str_contains(
-                        $identifier,
-                        $word
-                    )
-                ) {
-                    $score += 100;
-                }
+            if (
+                $nodes === false
+            ) {
+                continue;
             }
 
             /*
-             * کلمات منفی
+             * اگر selector خیلی عمومی بود،
+             * فقط عناصر مشخص را حذف می‌کنیم.
              */
-            $negativeWords = [
-                'sidebar',
-                'menu',
-                'navigation',
-                'nav',
-                'footer',
-                'header',
-                'comment',
-                'comments',
-                'related',
-                'advert',
-                'ads',
-                'social',
-                'share',
-                'breadcrumb',
-                'login',
-                'register',
-            ];
+            for (
+                $i = $nodes->length - 1;
+                $i >= 0;
+                $i--
+            ) {
+                $node =
+                    $nodes->item($i);
 
-            foreach ($negativeWords as $word) {
                 if (
-                    str_contains(
-                        $identifier,
-                        $word
-                    )
+                    !$node ||
+                    !$node->parentNode
                 ) {
-                    $score -= 150;
+                    continue;
                 }
+
+                /*
+                 * اگر body یا html بود حذف نکن.
+                 */
+                if (
+                    $node->nodeName === 'body' ||
+                    $node->nodeName === 'html'
+                ) {
+                    continue;
+                }
+
+                $node->parentNode
+                    ->removeChild($node);
             }
         }
-
-        /*
-         * اگر عنوان خبر داخل متن candidate باشد،
-         * احتمال اینکه خود خبر باشد بیشتر است.
-         */
-        if (
-            $title &&
-            mb_strlen($title) >= 10 &&
-            mb_stripos($text, $title) !== false
-        ) {
-            $score += 250;
-        }
-
-        /*
-         * تعداد پاراگراف‌ها.
-         * متن خبر معمولاً چندین p دارد.
-         */
-        if ($node instanceof DOMElement) {
-            $paragraphs =
-                $node->getElementsByTagName('p');
-
-            $paragraphCount =
-                $paragraphs->length;
-
-            $score += min(
-                300,
-                $paragraphCount * 20
-            );
-        }
-
-        return $score;
     }
 
     /**
-     * تبدیل یک Node به متن تمیز
+     * استخراج articleBody از JSON-LD
+     */
+    protected function extractJsonLdArticleBody(
+        DOMXPath $xpath
+    ): ?string {
+        $nodes =
+            $xpath->query(
+                '//script[
+                    contains(
+                        translate(
+                            @type,
+                            "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                            "abcdefghijklmnopqrstuvwxyz"
+                        ),
+                        "ld+json"
+                    )
+                ]'
+            );
+
+        if (
+            $nodes === false ||
+            $nodes->length === 0
+        ) {
+            return null;
+        }
+
+        $best = null;
+        $bestLength = 0;
+
+        foreach ($nodes as $node) {
+            $json =
+                trim(
+                    $node->textContent
+                );
+
+            if ($json === '') {
+                continue;
+            }
+
+            /*
+             * گاهی JSON-LD با escapeهای عجیب
+             * همراه است.
+             */
+            $data =
+                json_decode(
+                    $json,
+                    true
+                );
+
+            if (
+                !is_array($data)
+            ) {
+                continue;
+            }
+
+            $bodies =
+                $this->findArticleBodiesInJsonLd(
+                    $data
+                );
+
+            foreach ($bodies as $body) {
+                $body =
+                    $this->htmlToText(
+                        $body
+                    );
+
+                $body =
+                    trim($body);
+
+                $length =
+                    mb_strlen($body);
+
+                if (
+                    $length >
+                    $bestLength
+                ) {
+                    $bestLength =
+                        $length;
+
+                    $best =
+                        $body;
+                }
+            }
+        }
+
+        return $best;
+    }
+
+    /**
+     * جستجوی recursive برای articleBody
+     */
+    protected function findArticleBodiesInJsonLd(
+        mixed $data
+    ): array {
+        $result = [];
+
+        if (
+            !is_array($data)
+        ) {
+            return $result;
+        }
+
+        /*
+         * articleBody مستقیم
+         */
+        if (
+            isset($data['articleBody']) &&
+            is_string($data['articleBody'])
+        ) {
+            $result[] =
+                $data['articleBody'];
+        }
+
+        /*
+         * گاهی @graph داریم.
+         */
+        foreach (
+            $data as $key => $value
+        ) {
+            if (
+                is_array($value)
+            ) {
+                $result =
+                    array_merge(
+                        $result,
+                        $this->findArticleBodiesInJsonLd(
+                            $value
+                        )
+                    );
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * تبدیل Node به متن تمیز
      */
     protected function nodeToText(
         ?DOMNode $node
@@ -869,283 +1789,377 @@ class RssReader implements SourceReaderInterface
             return '';
         }
 
-        $text = $node->textContent ?? '';
+        /*
+         * ابتدا innerHTML را به متن تبدیل می‌کنیم.
+         */
+        $html =
+            '';
 
-        return $this->cleanText($text);
+        foreach (
+            $node->childNodes as $child
+        ) {
+            $html .=
+                $node->ownerDocument
+                    ? $node->ownerDocument
+                    ->saveHTML($child)
+                    : $child->textContent;
+        }
+
+        if ($html === '') {
+            $html =
+                $node->textContent;
+        }
+
+        return $this->htmlToText(
+            $html
+        );
     }
 
     /**
-     * تبدیل HTML به متن ساده
+     * تبدیل HTML به متن قابل جستجو
      */
     protected function htmlToText(
-        string $html
+        ?string $html
     ): string {
         if (!$html) {
             return '';
         }
 
         /*
-         * تبدیل br و paragraph به newline
+         * حذف script/style
          */
-        $html = preg_replace(
-            '/<\s*br\s*\/?>/i',
-            "\n",
-            $html
-        );
+        $html =
+            preg_replace(
+                '~<script\b[^>]*>.*?</script>~is',
+                ' ',
+                $html
+            ) ?? $html;
 
-        $html = preg_replace(
-            '/<\s*\/p\s*>/i',
-            "\n\n",
-            $html
-        );
-
-        $html = preg_replace(
-            '/<\s*\/div\s*>/i',
-            "\n",
-            $html
-        );
+        $html =
+            preg_replace(
+                '~<style\b[^>]*>.*?</style>~is',
+                ' ',
+                $html
+            ) ?? $html;
 
         /*
-         * حذف HTML
+         * بعضی تگ‌ها باید newline ایجاد کنند.
          */
-        $text = strip_tags(
-            $html
-        );
+        $html =
+            preg_replace(
+                '~<(br|p|div|li|article|section|h[1-6]|blockquote|tr)[^>]*>~i',
+                "\n",
+                $html
+            ) ?? $html;
+
+        $html =
+            preg_replace(
+                '~</(p|div|li|article|section|h[1-6]|blockquote|tr)>~i',
+                "\n",
+                $html
+            ) ?? $html;
 
         /*
-         * Decode کردن entityها
+         * HTML entity
          */
-        $text = html_entity_decode(
-            $text,
-            ENT_QUOTES |
-            ENT_HTML5,
-            'UTF-8'
-        );
+        $text =
+            html_entity_decode(
+                strip_tags($html),
+                ENT_QUOTES |
+                ENT_HTML5,
+                'UTF-8'
+            );
 
-        return $this->cleanText($text);
+        /*
+         * حذف کاراکترهای نامرئی
+         */
+        $text =
+            str_replace(
+                [
+                    "\xC2\xA0",
+                    "\u{200B}",
+                    "\u{200C}",
+                    "\u{200D}",
+                    "\u{FEFF}",
+                ],
+                [
+                    ' ',
+                    '',
+                    '‌',
+                    '',
+                    '',
+                ],
+                $text
+            );
+
+        /*
+         * یکسان‌سازی خطوط
+         */
+        $text =
+            preg_replace(
+                "/[ \t]+/u",
+                ' ',
+                $text
+            ) ?? $text;
+
+        $text =
+            preg_replace(
+                "/\n[ \t]+/u",
+                "\n",
+                $text
+            ) ?? $text;
+
+        $text =
+            preg_replace(
+                "/[ \t]+\n/u",
+                "\n",
+                $text
+            ) ?? $text;
+
+        /*
+         * بیشتر از دو خط خالی نداشته باشیم.
+         */
+        $text =
+            preg_replace(
+                "/\n{3,}/u",
+                "\n\n",
+                $text
+            ) ?? $text;
+
+        return trim($text);
     }
 
     /**
-     * تمیز کردن متن
+     * امتیازدهی به یک Node
      */
-    protected function cleanText(
-        string $text
-    ): string {
-        /*
-         * تبدیل NBSP
-         */
-        $text = str_replace(
-            "\xc2\xa0",
-            ' ',
-            $text
-        );
+    protected function scoreContentNode(
+        DOMNode $node,
+        string $text,
+        string $title = ''
+    ): float {
+        $length =
+            mb_strlen($text);
 
-        $text = str_replace(
-            "\u{00A0}",
-            ' ',
-            $text
-        );
+        if ($length < 1) {
+            return 0;
+        }
 
         /*
-         * حذف فاصله‌های اضافی
+         * پایه امتیاز بر اساس طول متن.
          */
-        $text = preg_replace(
-            '/[ \t]+/u',
-            ' ',
-            $text
-        );
+        $score =
+            min(
+                $length / 100,
+                1000
+            );
 
         /*
-         * حذف خطوط خالی متوالی
+         * تراکم پاراگراف.
          */
-        $text = preg_replace(
-            "/\n\s*\n\s*\n+/u",
-            "\n\n",
-            $text
-        );
+        $paragraphCount = 0;
+
+        if ($node instanceof DOMElement) {
+            $paragraphs =
+                $node->getElementsByTagName(
+                    'p'
+                );
+
+            $paragraphCount =
+                $paragraphs->length;
+        }
+
+        $score +=
+            min(
+                $paragraphCount * 8,
+                200
+            );
 
         /*
-         * trim هر خط
+         * اگر title داخل متن وجود داشته باشد،
+         * احتمالاً container خبر است.
          */
-        $lines = preg_split(
-            "/\r\n|\r|\n/u",
-            $text
-        );
+        if (
+            $title !== '' &&
+            mb_stripos(
+                $text,
+                $title
+            ) !== false
+        ) {
+            $score += 50;
+        }
 
-        $cleanLines = [];
+        /*
+         * نسبت حروف به طول کل.
+         */
+        $letters =
+            preg_match_all(
+                '/[\p{L}\p{N}]/u',
+                $text,
+                $matches
+            );
 
-        foreach ($lines as $line) {
-            $line = trim($line);
+        if (
+            $letters !== false &&
+            $length > 0
+        ) {
+            $ratio =
+                $letters / $length;
 
-            if ($line !== '') {
-                $cleanLines[] = $line;
+            if ($ratio > 0.45) {
+                $score += 100;
             }
         }
 
-        return trim(
-            implode("\n", $cleanLines)
-        );
+        /*
+         * متن‌هایی که بیش از حد بزرگ هستند
+         * احتمالاً container کل صفحه‌اند.
+         */
+        if ($length > 100000) {
+            $score *= 0.35;
+        } elseif ($length > 50000) {
+            $score *= 0.65;
+        }
+
+        return $score;
     }
 
     /**
-     * محدود کردن حجم محتوا
+     * بررسی اینکه متن احتمالاً متن خبر است.
+     */
+    protected function isValidArticleContent(
+        ?string $text
+    ): bool {
+        if (!$text) {
+            return false;
+        }
+
+        $text =
+            trim($text);
+
+        $length =
+            mb_strlen($text);
+
+        if (
+            $length <
+            $this->minimumContentLength
+        ) {
+            return false;
+        }
+
+        /*
+         * حداقل چند کلمه.
+         */
+        $wordCount =
+            preg_match_all(
+                '/\S+/u',
+                $text,
+                $matches
+            );
+
+        if (
+            $wordCount !== false &&
+            $wordCount < 15
+        ) {
+            return false;
+        }
+
+        /*
+         * متن‌هایی که تقریباً فقط URL هستند
+         * یا متن بسیار غیرطبیعی دارند.
+         */
+        $letters =
+            preg_match_all(
+                '/[\p{L}]/u',
+                $text,
+                $matches
+            );
+
+        if (
+            $letters !== false &&
+            $letters < 50
+        ) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * محدود کردن طول متن.
      */
     protected function limitContent(
         string $content
     ): string {
+        $content =
+            trim($content);
+
         if (
-            mb_strlen($content)
-            <= $this->maximumContentLength
+            mb_strlen($content) <=
+            $this->maximumContentLength
         ) {
             return $content;
         }
 
-        return mb_substr(
-            $content,
-            0,
-            $this->maximumContentLength
-        );
+        return trim(
+                mb_substr(
+                    $content,
+                    0,
+                    $this->maximumContentLength
+                )
+            ) .
+            "\n\n[...]";
     }
 
     /**
-     * @param iterable<SimpleXMLElement> $entries
-     * @return SourceItemData[]
+     * نرمال‌سازی URL
      */
-    protected function parseAtomEntries(
-        iterable $entries
-    ): array {
-        $result = [];
-
-        foreach ($entries as $entry) {
-            $title = trim(
-                (string) $entry->title
-            );
-
-            $id = trim(
-                (string) $entry->id
-            );
-
-            /*
-             * Atom content
-             */
-            $content = trim(
-                (string) $entry->content
-            );
-
-            /*
-             * Atom summary
-             */
-            $summary = trim(
-                (string) $entry->summary
-            );
-
-            /*
-             * اگر content وجود نداشت summary
-             */
-            if (!$content) {
-                $content = $summary;
-            }
-
-            $url = null;
-
-            if (isset($entry->link)) {
-                foreach ($entry->link as $link) {
-                    $attributes =
-                        $link->attributes();
-
-                    if (
-                        isset($attributes['rel']) &&
-                        (string) $attributes['rel'] === 'alternate'
-                    ) {
-                        $url = trim(
-                            (string) $attributes['href']
-                        );
-
-                        break;
-                    }
-
-                    if (
-                        !$url &&
-                        isset($attributes['href'])
-                    ) {
-                        $url = trim(
-                            (string) $attributes['href']
-                        );
-                    }
-                }
-            }
-
-            /*
-             * اگر Atom متن مناسب نداشت،
-             * خود صفحه خبر را باز می‌کنیم.
-             */
-            $pageContent = null;
-
-            if (
-                $url &&
-                $this->shouldFetchArticlePage($content)
-            ) {
-                $pageContent =
-                    $this->fetchArticleContent(
-                        $url,
-                        $title
-                    );
-
-                if ($pageContent) {
-                    $content = $pageContent;
-                }
-            }
-
-            $published = trim(
-                (string) $entry->published
-            );
-
-            if (!$published) {
-                $published = trim(
-                    (string) $entry->updated
-                );
-            }
-
-            $publishedAt = null;
-
-            if ($published) {
-                try {
-                    $publishedAt =
-                        Carbon::parse($published);
-                } catch (\Throwable) {
-                    $publishedAt = null;
-                }
-            }
-
-            $externalId =
-                $id ?: $url;
-
-            if (!$externalId) {
-                continue;
-            }
-
-            $result[] = new SourceItemData(
-                externalId: $externalId,
-                title: $title,
-                url: $url,
-                content: $content ?: null,
-                publishedAt: $publishedAt,
-                rawData: [
-                    'id' => $id,
-
-                    'published' => $published,
-
-                    'updated' =>
-                        (string) $entry->updated,
-
-                    'summary' => $summary,
-
-                    'page_content_loaded' =>
-                        $pageContent !== null,
-                ],
-            );
+    protected function normalizeUrl(
+        ?string $url
+    ): string {
+        if (!$url) {
+            return '';
         }
 
-        return $result;
+        $url =
+            trim($url);
+
+        if ($url === '') {
+            return '';
+        }
+
+        /*
+         * حذف whitespaceهای مخفی
+         */
+        $url =
+            preg_replace(
+                '/\s+/u',
+                '',
+                $url
+            ) ?? $url;
+
+        /*
+         * فقط HTTP/HTTPS
+         */
+        $scheme =
+            parse_url(
+                $url,
+                PHP_URL_SCHEME
+            );
+
+        if (
+            $scheme &&
+            !in_array(
+                strtolower($scheme),
+                [
+                    'http',
+                    'https',
+                ],
+                true
+            )
+        ) {
+            return '';
+        }
+
+        return $url;
     }
 }
