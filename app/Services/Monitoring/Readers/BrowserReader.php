@@ -4,7 +4,7 @@ namespace App\Services\Monitoring\Readers;
 
 use App\Models\Source;
 use App\Services\Monitoring\SourceItemData;
-use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Playwright\Playwright;
 use Throwable;
@@ -12,506 +12,250 @@ use Throwable;
 class BrowserReader implements SourceReaderInterface
 {
     /**
-     * حداکثر زمان انتظار برای لود صفحه
+     * تعداد تقریبی خبرهایی که حداکثر می‌خواهیم جمع کنیم.
      */
-    protected int $navigationTimeout = 30000;
+    private int $maxItems = 30;
 
     /**
-     * مدت انتظار بعد از لود صفحه برای اجرای JS
+     * تعداد دفعاتی که اگر آیتم جدید پیدا نشد اسکرول ادامه پیدا کند.
      */
-    protected int $waitAfterLoad = 2000;
+    private int $maxEmptyScrolls = 5;
 
     /**
-     * حداکثر تعداد خبرهایی که از صفحه لیست می‌خوانیم.
+     * فاصله اسکرول‌ها.
      */
-    protected int $maxItems = 30;
+    private int $scrollStep = 900;
+
+    /**
+     * زمان انتظار بعد از اسکرول.
+     */
+    private int $scrollWait = 700;
+
+    /**
+     * زمان انتظار اولیه برای رندر شدن صفحه.
+     */
+    private int $initialWait = 2000;
 
     /**
      * اجرای Reader
      */
     public function read(Source $source): array
     {
-        $settings = $source->settings ?? [];
-
-        $listUrl = $settings['list_url']
-            ?? $source->url;
-
-        if (!$listUrl) {
-            throw new \RuntimeException(
-                "آدرس صفحه برای منبع [{$source->name}] مشخص نشده است."
-            );
-        }
-
-        $browser = null;
         $context = null;
 
         try {
+            Log::info('BrowserReader started', [
+                'source_id' => $source->id,
+                'source_name' => $source->name,
+                'url' => $source->url,
+            ]);
+
             /*
-             * ساخت Browser
+             * نکته مهم:
+             *
+             * Playwright::chromium() در نسخه فعلی playwright-php
+             * یک BrowserContext برمی‌گرداند.
+             *
+             * بنابراین نباید روی نتیجه آن newContext() بزنیم.
              */
-            $browser = Playwright::chromium([
+            $context = Playwright::chromium([
                 'headless' => true,
 
+                /*
+                 * برای سرور Linux معمولاً این آرگومان‌ها کمک می‌کنند.
+                 */
                 'args' => [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
                     '--disable-gpu',
-                    '--no-first-run',
                     '--no-zygote',
-                    '--single-process',
+                ],
+
+                /*
+                 * تنظیمات context
+                 */
+                'context' => [
+                    'viewport' => [
+                        'width' => 1440,
+                        'height' => 900,
+                    ],
+
+                    'locale' => 'fa-IR',
+
+                    'userAgent' =>
+                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                        . 'AppleWebKit/537.36 (KHTML, like Gecko) '
+                        . 'Chrome/151.0.0.0 Safari/537.36',
                 ],
             ]);
 
-            /*
-             * Context
-             */
-            $context = $browser->newContext([
-                'locale' => 'fa-IR',
-
-                'timezoneId' =>
-                    'Asia/Tehran',
-
-                'userAgent' =>
-                    'Mozilla/5.0 (X11; Linux x86_64) ' .
-                    'AppleWebKit/537.36 ' .
-                    '(KHTML, like Gecko) ' .
-                    'Chrome/139.0.0.0 Safari/537.36',
-
-                'viewport' => [
-                    'width' => 1440,
-                    'height' => 900,
-                ],
-
-                'ignoreHTTPSErrors' => true,
-            ]);
-
-            /*
-             * Page لیست
-             */
             $page = $context->newPage();
 
-            $this->configurePage(
-                $page,
-                $settings
-            );
-
             /*
-             * باز کردن صفحه
+             * مشخص می‌کنیم این Source مربوط به فارس‌نیوز است یا خیر.
              */
-            $page->goto(
-                $listUrl,
-                [
-                    'waitUntil' =>
-                        'domcontentloaded',
-
-                    'timeout' =>
-                        $this->navigationTimeout,
-                ]
-            );
-
-            /*
-             * صبر برای اجرای JavaScript
-             */
-            $this->waitForPage(
-                $page,
-                $settings
-            );
-
-            /*
-             * اگر selector خاصی تعیین شده،
-             * تا ظاهر شدن آن صبر کن.
-             */
-            if (!empty(
-                $settings['wait_for']
-            )) {
-                try {
-                    $page->locator(
-                        $settings['wait_for']
-                    )->first()->waitFor([
-                        'state' => 'visible',
-                        'timeout' =>
-                            $settings['wait_for_timeout']
-                            ?? 15000,
-                    ]);
-                } catch (Throwable $e) {
-                    logger()->debug(
-                        'BrowserReader wait_for timeout',
-                        [
-                            'source' =>
-                                $source->name,
-
-                            'selector' =>
-                                $settings['wait_for'],
-
-                            'error' =>
-                                $e->getMessage(),
-                        ]
-                    );
-                }
+            if ($this->isFarsnews($source)) {
+                $items = $this->readFarsnews($page, $context, $source);
+            } else {
+                $items = $this->readGeneric($page, $context, $source);
             }
 
-            /*
-             * استخراج آیتم‌های صفحه
-             */
-            $items = $this->extractItems(
-                $page,
-                $settings
-            );
+            Log::info('BrowserReader finished', [
+                'source_id' => $source->id,
+                'source_name' => $source->name,
+                'items_count' => count($items),
+            ]);
 
-            /*
-             * محدود کردن تعداد
-             */
-            $items = array_slice(
-                $items,
-                0,
-                (int) (
-                    $settings['max_items']
-                    ?? $this->maxItems
-                )
-            );
+            return $items;
+        } catch (Throwable $e) {
+            Log::error('BrowserReader failed', [
+                'source_id' => $source->id ?? null,
+                'source_name' => $source->name ?? null,
+                'url' => $source->url ?? null,
 
-            /*
-             * اگر لینک خبرها نسبی بود،
-             * تبدیل به absolute URL می‌کنیم.
-             */
-            foreach ($items as &$item) {
-                if (!empty($item['url'])) {
-                    $item['url'] =
-                        $this->absoluteUrl(
-                            $listUrl,
-                            $item['url']
-                        );
-                }
-            }
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
 
-            unset($item);
-
-            /*
-             * حالا هر خبر را جداگانه باز می‌کنیم.
-             *
-             * این قسمت مهم است:
-             * صفحه لیست فقط برای پیدا کردن
-             * خبرهای جدید است.
-             *
-             * محتوای واقعی از صفحه خود خبر
-             * استخراج می‌شود.
-             */
-            $result = [];
-
-            foreach ($items as $index => $item) {
-                try {
-                    $sourceItem =
-                        $this->readArticle(
-                            $context,
-                            $item,
-                            $settings,
-                            $index
-                        );
-
-                    if ($sourceItem) {
-                        $result[] =
-                            $sourceItem;
-                    }
-
-                } catch (Throwable $e) {
-                    logger()->warning(
-                        'BrowserReader article failed',
-                        [
-                            'source' =>
-                                $source->name,
-
-                            'url' =>
-                                $item['url']
-                                ?? null,
-
-                            'title' =>
-                                $item['title']
-                                ?? null,
-
-                            'error' =>
-                                $e->getMessage(),
-                        ]
-                    );
-                }
-            }
-
-            return $result;
-
+            throw $e;
         } finally {
-            /*
-             * Context و Browser حتماً بسته شوند.
-             */
-            try {
-                if ($context) {
+            if ($context) {
+                try {
                     $context->close();
+                } catch (Throwable $e) {
+                    Log::warning('Could not close Playwright context', [
+                        'message' => $e->getMessage(),
+                    ]);
                 }
-            } catch (Throwable) {
-            }
-
-            try {
-                if ($browser) {
-                    $browser->close();
-                }
-            } catch (Throwable) {
             }
         }
     }
 
     /**
-     * تنظیمات Page
+     * تشخیص فارس‌نیوز
      */
-    protected function configurePage(
-        mixed $page,
-        array $settings
-    ): void {
+    private function isFarsnews(Source $source): bool
+    {
+        $url = strtolower($source->url ?? '');
+
+        return str_contains($url, 'farsnews.ir');
+    }
+
+    /**
+     * Reader مخصوص فارس‌نیوز
+     */
+    private function readFarsnews($page, $context, Source $source): array
+    {
+        $url = $this->getListUrl($source);
+
+        Log::info('Opening Farsnews search page', [
+            'url' => $url,
+        ]);
+
         /*
-         * جلوگیری از دریافت منابع غیرضروری
-         *
-         * در صورت فعال بودن.
+         * باز کردن صفحه جستجو
          */
-        if (
-            ($settings['block_resources'] ?? false)
-        ) {
-            $page->route(
-                '**/*',
-                function ($route) {
-                    $request =
-                        $route->request();
+        $page->goto($url, [
+            'waitUntil' => 'domcontentloaded',
+            'timeout' => 60000,
+        ]);
 
-                    $resourceType =
-                        $request->resourceType();
-
-                    if (
-                        in_array(
-                            $resourceType,
-                            [
-                                'image',
-                                'font',
-                                'media',
-                            ],
-                            true
-                        )
-                    ) {
-                        $route->abort();
-                        return;
-                    }
-
-                    $route->continue();
-                }
-            );
-        }
-    }
-
-    /**
-     * انتظار برای آماده شدن صفحه
-     */
-    protected function waitForPage(
-        mixed $page,
-        array $settings
-    ): void {
         /*
-         * اول network idle
+         * کمی زمان برای اجرای JavaScript و React/Svelte/Vue
+         */
+        $this->sleep($this->initialWait);
+
+        Log::info('Farsnews page loaded', [
+            'url' => $page->url(),
+        ]);
+
+        /*
+         * منتظر اولین blockquote خبر می‌مانیم.
+         *
+         * طبق HTML رندرشده‌ای که بررسی کردیم:
+         *
+         * <blockquote
+         *     cite="https://farsnews.ir/MaryamKarami/1788294412602594881"
+         * >
+         *
+         * بنابراین cite قابل اعتمادترین راه استخراج URL خبر است.
          */
         try {
-            $page->waitForLoadState(
-                'networkidle',
-                [
-                    'timeout' =>
-                        $settings[
-                            'network_idle_timeout'
-                        ]
-                        ?? 10000,
-                ]
-            );
-        } catch (Throwable) {
+            $page->locator(
+                'blockquote[cite^="https://farsnews.ir/"]'
+            )->first()->waitFor([
+                'state' => 'visible',
+                'timeout' => 15000,
+            ]);
+        } catch (Throwable $e) {
             /*
-             * بعضی سایت‌ها همیشه connection باز دارند.
-             * در این حالت timeout طبیعی است.
+             * ممکن است صفحه هنوز در حال رندر باشد.
+             * در این حالت ادامه می‌دهیم و بعد count را بررسی می‌کنیم.
              */
+            Log::warning('Farsnews result locator wait failed', [
+                'message' => $e->getMessage(),
+            ]);
         }
 
         /*
-         * سپس کمی فرصت برای Render شدن JS.
+         * جمع‌آوری خبرها
          */
-        $wait =
-            (int) (
-                $settings['wait_after_load']
-                ?? $this->waitAfterLoad
+        $results = $this->collectFarsnewsResults($page);
+
+        Log::info('Farsnews search results collected', [
+            'count' => count($results),
+        ]);
+
+        /*
+         * اگر هیچ نتیجه‌ای پیدا نشد، HTML را ذخیره می‌کنیم.
+         * این برای تشخیص تغییر ساختار سایت بسیار مفید است.
+         */
+        if (count($results) === 0) {
+            $this->saveDebugHtml(
+                $page,
+                'farsnews-no-results'
             );
 
-        if ($wait > 0) {
-            usleep(
-                $wait * 1000
+            throw new \RuntimeException(
+                'هیچ نتیجه‌ای از صفحه جستجوی فارس‌نیوز پیدا نشد.'
             );
         }
-    }
 
-    /**
-     * استخراج خبرها از صفحه لیست
-     */
-    protected function extractItems(
-        mixed $page,
-        array $settings
-    ): array {
-        $itemSelector =
-            $settings['item_selector']
-            ?? 'article';
-
-        $titleSelector =
-            $settings['title_selector']
-            ?? 'h2, h3, .title';
-
-        $linkSelector =
-            $settings['link_selector']
-            ?? 'a';
-
-        $dateSelector =
-            $settings['date_selector']
-            ?? null;
-
+        /*
+         * حالا تک تک خبرها را باز می‌کنیم تا متن کامل خبر را بگیریم.
+         */
         $items = [];
 
-        $locator =
-            $page->locator(
-                $itemSelector
-            );
-
-        $count =
-            $locator->count();
-
-        /*
-         * اگر selector اصلی چیزی پیدا نکرد،
-         * fallback عمومی.
-         */
-        if ($count === 0) {
-            $locator =
-                $page->locator(
-                    'article, .news-item, .post, li'
-                );
-
-            $count =
-                $locator->count();
-        }
-
-        for (
-            $i = 0;
-            $i < $count;
-            $i++
-        ) {
-            if (
-                count($items) >=
-                (
-                    $settings['max_items']
-                    ?? $this->maxItems
-                )
-            ) {
+        foreach ($results as $index => $result) {
+            if (count($items) >= $this->maxItems) {
                 break;
             }
 
             try {
-                $item =
-                    $locator->nth($i);
+                Log::info('Reading Farsnews article', [
+                    'index' => $index + 1,
+                    'url' => $result['url'],
+                    'title' => $result['title'],
+                ]);
 
-                $title =
-                    $this->extractText(
-                        $item,
-                        $titleSelector
-                    );
-
-                $url =
-                    $this->extractHref(
-                        $item,
-                        $linkSelector
-                    );
-
-                $date = null;
-
-                if ($dateSelector) {
-                    $date =
-                        $this->extractText(
-                            $item,
-                            $dateSelector
-                        );
-                }
-
-                /*
-                 * اگر عنوان یا لینک نداریم،
-                 * احتمالاً این آیتم خبر نیست.
-                 */
-                if (
-                    trim($title) === '' &&
-                    trim($url) === ''
-                ) {
-                    continue;
-                }
-
-                /*
-                 * اگر عنوان پیدا نشد،
-                 * کل متن کوتاه آیتم را امتحان کن.
-                 */
-                if (
-                    trim($title) === ''
-                ) {
-                    try {
-                        $title =
-                            trim(
-                                $item->innerText()
-                            );
-                    } catch (Throwable) {
-                        $title = '';
-                    }
-                }
-
-                /*
-                 * اگر لینک داخل selector نبود،
-                 * اولین a را امتحان کن.
-                 */
-                if (
-                    trim($url) === ''
-                ) {
-                    $url =
-                        $this->extractHref(
-                            $item,
-                            'a'
-                        );
-                }
-
-                if (
-                    trim($url) === ''
-                ) {
-                    continue;
-                }
-
-                $items[] = [
-                    'title' =>
-                        $this->cleanText(
-                            $title
-                        ),
-
-                    'url' =>
-                        trim($url),
-
-                    'date' =>
-                        $date
-                        ? $this->cleanText(
-                            $date
-                        )
-                        : null,
-
-                    'list_index' =>
-                        $i,
-                ];
-
-            } catch (Throwable $e) {
-                logger()->debug(
-                    'BrowserReader list item failed',
-                    [
-                        'index' => $i,
-                        'error' =>
-                            $e->getMessage(),
-                    ]
+                $item = $this->readFarsnewsArticle(
+                    $context,
+                    $source,
+                    $result
                 );
+
+                if ($item !== null) {
+                    $items[] = $item;
+                }
+            } catch (Throwable $e) {
+                Log::warning('Failed to read Farsnews article', [
+                    'url' => $result['url'],
+                    'title' => $result['title'],
+                    'message' => $e->getMessage(),
+                ]);
             }
         }
 
@@ -519,782 +263,676 @@ class BrowserReader implements SourceReaderInterface
     }
 
     /**
-     * خواندن صفحه یک خبر
+     * جمع‌آوری نتایج صفحه جستجوی فارس‌نیوز
+     *
+     * فارس‌نیوز از Virtual List استفاده می‌کند.
+     * بنابراین همه خبرها الزاماً همزمان در DOM نیستند.
      */
-    protected function readArticle(
-        mixed $context,
-        array $item,
-        array $settings,
-        int $index
-    ): ?SourceItemData {
-        $url =
-            trim(
-                $item['url'] ?? ''
+    private function collectFarsnewsResults($page): array
+    {
+        $results = [];
+
+        $emptyScrolls = 0;
+        $lastCount = 0;
+
+        /*
+         * چند مرحله اسکرول می‌کنیم.
+         */
+        for ($scroll = 0; $scroll < 100; $scroll++) {
+            /*
+             * خبرهای موجود در DOM فعلی
+             */
+            $locator = $page->locator(
+                'blockquote[cite^="https://farsnews.ir/"]'
             );
 
-        if ($url === '') {
-            return null;
-        }
+            $count = $locator->count();
 
-        $page =
-            $context->newPage();
-
-        try {
-            $this->configurePage(
-                $page,
-                $settings
-            );
-
-            $page->goto(
-                $url,
-                [
-                    'waitUntil' =>
-                        'domcontentloaded',
-
-                    'timeout' =>
-                        $settings[
-                            'article_timeout'
-                        ]
-                        ?? $this->navigationTimeout,
-                ]
-            );
-
-            /*
-             * صبر برای JS
-             */
-            $this->waitForPage(
-                $page,
-                $settings
-            );
-
-            /*
-             * اگر selector محتوای خبر مشخص شده،
-             * تا ظاهر شدن آن صبر کن.
-             */
-            $contentSelector =
-                $settings[
-                    'content_selector'
-                ]
-                ?? 'article, main';
-
-            try {
-                $contentLocator =
-                    $page->locator(
-                        $contentSelector
-                    )->first();
-
-                $contentLocator->waitFor([
-                    'state' =>
-                        'visible',
-
-                    'timeout' =>
-                        $settings[
-                            'content_timeout'
-                        ]
-                        ?? 10000,
-                ]);
-            } catch (Throwable) {
-                /*
-                 * fallback به body
-                 */
-            }
-
-            /*
-             * استخراج عنوان
-             */
-            $title =
-                $this->extractArticleTitle(
-                    $page,
-                    $settings
-                );
-
-            if (
-                $title === ''
-            ) {
-                $title =
-                    $item['title']
-                    ?? '';
-            }
-
-            /*
-             * استخراج محتوا
-             */
-            $content =
-                $this->extractArticleContent(
-                    $page,
-                    $settings
-                );
-
-            /*
-             * اگر content_selector اشتباه بود،
-             * body را به عنوان fallback می‌گیریم.
-             */
-            if (
-                trim($content) === ''
-            ) {
+            for ($i = 0; $i < $count; $i++) {
                 try {
-                    $content =
-                        $page
-                            ->locator('body')
-                            ->innerText();
-                } catch (Throwable) {
-                    $content = '';
+                    $post = $locator->nth($i);
+
+                    /*
+                     * URL واقعی خبر در cite قرار دارد.
+                     */
+                    $url = trim(
+                        (string) $post->getAttribute('cite')
+                    );
+
+                    if ($url === '') {
+                        continue;
+                    }
+
+                    /*
+                     * نرمال‌سازی URL
+                     */
+                    $url = $this->normalizeUrl($url);
+
+                    /*
+                     * عنوان
+                     *
+                     * طبق HTML:
+                     *
+                     * .post-contents h3
+                     */
+                    $title = '';
+
+                    try {
+                        $title = trim(
+                            (string) $post
+                                ->locator('.post-contents h3')
+                                ->innerText()
+                        );
+                    } catch (Throwable $e) {
+                        // ignore
+                    }
+
+                    /*
+                     * اگر عنوان پیدا نشد، fallback
+                     */
+                    if ($title === '') {
+                        try {
+                            $title = trim(
+                                (string) $post
+                                    ->locator('h3')
+                                    ->first()
+                                    ->innerText()
+                            );
+                        } catch (Throwable $e) {
+                            // ignore
+                        }
+                    }
+
+                    /*
+                     * خلاصه خبر
+                     */
+                    $summary = '';
+
+                    try {
+                        $summary = trim(
+                            (string) $post
+                                ->locator('.post-contents .n-u1u0l1')
+                                ->innerText()
+                        );
+                    } catch (Throwable $e) {
+                        // ignore
+                    }
+
+                    /*
+                     * اگر قبلاً این URL را دیده‌ایم، رد شو.
+                     */
+                    if (isset($results[$url])) {
+                        continue;
+                    }
+
+                    $results[$url] = [
+                        'url' => $url,
+                        'title' => $this->cleanText($title),
+                        'summary' => $this->cleanText($summary),
+                    ];
+
+                    if (count($results) >= $this->maxItems) {
+                        break 2;
+                    }
+                } catch (Throwable $e) {
+                    Log::debug(
+                        'Could not parse Farsnews result',
+                        [
+                            'message' => $e->getMessage(),
+                        ]
+                    );
                 }
             }
 
-            $content =
-                $this->cleanText(
-                    $content
-                );
+            $currentCount = count($results);
+
+            Log::debug('Farsnews scroll iteration', [
+                'iteration' => $scroll,
+                'dom_items' => $count,
+                'unique_items' => $currentCount,
+            ]);
 
             /*
-             * حذف title از ابتدای content
-             * در صورت نیاز لازم نیست؛
-             * چون KeywordMatcher مشکلی با آن ندارد.
+             * اگر آیتم جدیدی پیدا نشد، شمارنده را زیاد می‌کنیم.
              */
+            if ($currentCount === $lastCount) {
+                $emptyScrolls++;
+            } else {
+                $emptyScrolls = 0;
+            }
+
+            $lastCount = $currentCount;
 
             /*
-             * شناسه پایدار خبر
+             * اگر چند بار پشت سر هم چیزی پیدا نشد،
+             * احتمالاً به انتهای لیست رسیده‌ایم.
              */
-            $externalId =
-                $this->makeExternalId(
-                    $url,
-                    $item
+            if ($emptyScrolls >= $this->maxEmptyScrolls) {
+                break;
+            }
+
+            /*
+             * اسکرول مرحله‌ای.
+             *
+             * از scrollTo با مقدار ثابت استفاده می‌کنیم
+             * تا Virtual List فارس‌نیوز فعال شود.
+             */
+            try {
+                $page->evaluate(
+                    <<<JS
+                    () => {
+                        window.scrollBy({
+                            top: {$this->scrollStep},
+                            left: 0,
+                            behavior: 'instant'
+                        });
+                    }
+                    JS
                 );
+            } catch (Throwable $e) {
+                /*
+                 * بعضی نسخه‌های مرورگر ممکن است behavior=instant
+                 * را نپذیرند.
+                 */
+                $page->evaluate(
+                    "window.scrollBy(0, {$this->scrollStep});"
+                );
+            }
+
+            $this->sleep($this->scrollWait);
+        }
+
+        /*
+         * آرایه associative را به indexed array تبدیل می‌کنیم.
+         */
+        return array_values($results);
+    }
+
+    /**
+     * باز کردن صفحه کامل خبر فارس‌نیوز
+     */
+    private function readFarsnewsArticle(
+        $context,
+        Source $source,
+        array $result
+    ): ?SourceItemData {
+        $articlePage = null;
+
+        try {
+            $articlePage = $context->newPage();
+
+            $articlePage->goto($result['url'], [
+                'waitUntil' => 'domcontentloaded',
+                'timeout' => 60000,
+            ]);
+
+            /*
+             * اجازه می‌دهیم محتوای JavaScript کامل شود.
+             */
+            $this->sleep(1500);
+
+            /*
+             * عنوان
+             */
+            $title = '';
+
+            $titleSelectors = [
+                'h1',
+                'article h1',
+                'main h1',
+            ];
+
+            foreach ($titleSelectors as $selector) {
+                try {
+                    $text = trim(
+                        (string) $articlePage
+                            ->locator($selector)
+                            ->first()
+                            ->innerText()
+                    );
+
+                    if ($text !== '') {
+                        $title = $text;
+                        break;
+                    }
+                } catch (Throwable $e) {
+                    // try next selector
+                }
+            }
+
+            if ($title === '') {
+                $title = $result['title'];
+            }
+
+            /*
+             * متن کامل خبر
+             *
+             * چون ساختار داخلی صفحه خبر ممکن است با نسخه فعلی
+             * سایت تغییر کند، چند selector را امتحان می‌کنیم.
+             */
+            $content = '';
+
+            $contentSelectors = [
+                'article',
+                'main article',
+                'main .post-content',
+                'main .article-content',
+                '[class*="article-content"]',
+                '[class*="post-content"]',
+                'main',
+            ];
+
+            foreach ($contentSelectors as $selector) {
+                try {
+                    $text = trim(
+                        (string) $articlePage
+                            ->locator($selector)
+                            ->first()
+                            ->innerText()
+                    );
+
+                    /*
+                     * متن خیلی کوتاه احتمالاً container اصلی نیست.
+                     */
+                    if (mb_strlen($text) > 150) {
+                        $content = $text;
+                        break;
+                    }
+                } catch (Throwable $e) {
+                    // try next selector
+                }
+            }
+
+            /*
+             * آخرین fallback:
+             * کل body صفحه.
+             */
+            if ($content === '') {
+                try {
+                    $content = trim(
+                        (string) $articlePage
+                            ->locator('body')
+                            ->innerText()
+                    );
+                } catch (Throwable $e) {
+                    // ignore
+                }
+            }
+
+            /*
+             * تمیز کردن متن
+             */
+            $content = $this->cleanArticleText(
+                $content,
+                $title
+            );
+
+            /*
+             * اگر متن واقعاً پیدا نشد، حداقل خلاصه را نگه می‌داریم.
+             */
+            if ($content === '') {
+                $content = $result['summary'];
+            }
 
             /*
              * تاریخ
              */
-            $publishedAt =
-                $this->extractPublishedAt(
-                    $page,
-                    $item,
-                    $settings
+            $date = null;
+
+            try {
+                $dateText = trim(
+                    (string) $articlePage
+                        ->locator('time')
+                        ->first()
+                        ->getAttribute('datetime')
                 );
+
+                if ($dateText !== '') {
+                    $date = $dateText;
+                }
+            } catch (Throwable $e) {
+                // ignore
+            }
 
             /*
-             * اگر متن خیلی کم بود،
-             * این صفحه احتمالاً خبر واقعی نیست.
+             * در صورت نبود datetime، متن time را بررسی می‌کنیم.
              */
-            $minimumContent =
-                (int) (
-                    $settings[
-                        'minimum_content_length'
-                    ]
-                    ?? 100
-                );
+            if ($date === null) {
+                try {
+                    $dateText = trim(
+                        (string) $articlePage
+                            ->locator('time')
+                            ->first()
+                            ->innerText()
+                    );
 
-            if (
-                mb_strlen($content) <
-                $minimumContent
-            ) {
-                logger()->debug(
-                    'BrowserReader article content too short',
-                    [
-                        'url' => $url,
-                        'length' =>
-                            mb_strlen($content),
-                    ]
-                );
-
-                /*
-                 * با این حال اگر title داریم،
-                 * خبر را کاملاً حذف نکن.
-                 */
+                    if ($dateText !== '') {
+                        $date = $dateText;
+                    }
+                } catch (Throwable $e) {
+                    // ignore
+                }
             }
 
-            return new SourceItemData(
-                externalId:
-                    $externalId,
-
-                title:
-                    $title,
-
-                url:
-                    $url,
-
-                content:
-                    $content,
-
-                publishedAt:
-                    $publishedAt,
-
-                rawData: [
-                    'reader' =>
-                        'browser',
-
-                    'list_index' =>
-                        $index,
-
-                    'list_title' =>
-                        $item['title']
-                        ?? null,
-
-                    'list_date' =>
-                        $item['date']
-                        ?? null,
-
-                    'page_title' =>
-                        $this->safePageTitle(
-                            $page
-                        ),
-
-                    'content_selector' =>
-                        $contentSelector,
-
-                    'source_url' =>
-                        $url,
-                ],
+            /*
+             * ساخت DTO
+             *
+             * این بخش را با constructor واقعی SourceItemData
+             * پروژه خودت تطبیق بده اگر نام فیلدها متفاوت است.
+             */
+            return new
+            SourceItemData(
+                externalId: $source->id,
+                title: $this->cleanText($title),
+                url: $result['url'],
+                content: $content ?: null,
+                publishedAt: $date,
+                rawData: [],
             );
-
         } finally {
-            try {
-                $page->close();
-            } catch (Throwable) {
+            if ($articlePage) {
+                try {
+                    $articlePage->close();
+                } catch (Throwable $e) {
+                    // ignore
+                }
             }
         }
     }
 
     /**
-     * عنوان صفحه خبر
+     * Reader عمومی برای سایت‌هایی غیر از فارس‌نیوز
      */
-    protected function extractArticleTitle(
-        mixed $page,
-        array $settings
-    ): string {
-        $selectors = [
-            $settings[
-                'article_title_selector'
-            ] ?? null,
+    private function readGeneric($page, $context, Source $source): array
+    {
+        $page->goto($source->url, [
+            'waitUntil' => 'domcontentloaded',
+            'timeout' => 60000,
+        ]);
 
-            'article h1',
-            'main h1',
-            'h1',
-            '[data-testid="article-title"]',
-            '.article-title',
-            '.post-title',
-            '.news-title',
-        ];
+        $this->sleep($this->initialWait);
 
-        foreach ($selectors as $selector) {
-            if (!$selector) {
-                continue;
-            }
+        $title = '';
 
-            try {
-                $locator =
-                    $page
-                        ->locator($selector)
-                        ->first();
-
-                if (
-                    $locator->count() === 0
-                ) {
-                    continue;
-                }
-
-                $text =
-                    trim(
-                        $locator->innerText()
-                    );
-
-                if ($text !== '') {
-                    return $this->cleanText(
-                        $text
-                    );
-                }
-
-            } catch (Throwable) {
-                continue;
-            }
-        }
-
-        /*
-         * title خود document
-         */
         try {
-            $title =
-                trim(
-                    $page->title()
-                );
-
-            if ($title !== '') {
-                return $this->cleanText(
-                    $title
-                );
-            }
-        } catch (Throwable) {
-        }
-
-        return '';
-    }
-
-    /**
-     * محتوای صفحه خبر
-     */
-    protected function extractArticleContent(
-        mixed $page,
-        array $settings
-    ): string {
-        $selectors = [
-            $settings[
-                'content_selector'
-            ] ?? null,
-
-            'article',
-            'main',
-            '[data-testid="article-content"]',
-            '.article-content',
-            '.article-body',
-            '.post-content',
-            '.post-body',
-            '.news-content',
-            '.news-body',
-            '.story-body',
-            '.content-body',
-        ];
-
-        /*
-         * selectorهای تکراری حذف شوند.
-         */
-        $selectors =
-            array_values(
-                array_unique(
-                    array_filter(
-                        $selectors
-                    )
-                )
+            $title = trim(
+                (string) $page
+                    ->locator('h1')
+                    ->first()
+                    ->innerText()
             );
-
-        $best = '';
-
-        foreach ($selectors as $selector) {
-            try {
-                $locator =
-                    $page
-                        ->locator($selector);
-
-                $count =
-                    $locator->count();
-
-                if ($count === 0) {
-                    continue;
-                }
-
-                /*
-                 * چند مورد را بررسی کن و
-                 * طولانی‌ترین متن را انتخاب کن.
-                 */
-                $limit =
-                    min($count, 5);
-
-                for (
-                    $i = 0;
-                    $i < $limit;
-                    $i++
-                ) {
-                    try {
-                        $text =
-                            $locator
-                                ->nth($i)
-                                ->innerText();
-
-                        $text =
-                            $this->cleanText(
-                                $text
-                            );
-
-                        if (
-                            mb_strlen($text) >
-                            mb_strlen($best)
-                        ) {
-                            $best =
-                                $text;
-                        }
-                    } catch (Throwable) {
-                    }
-                }
-
-                /*
-                 * اگر متن مناسب پیدا شد،
-                 * ادامه لازم نیست.
-                 */
-                if (
-                    mb_strlen($best) >= 500
-                ) {
-                    break;
-                }
-
-            } catch (Throwable) {
-                continue;
-            }
-        }
-
-        return trim($best);
-    }
-
-    /**
-     * استخراج تاریخ انتشار
-     */
-    protected function extractPublishedAt(
-        mixed $page,
-        array $item,
-        array $settings
-    ): ?Carbon {
-        /*
-         * اول metaهای استاندارد.
-         */
-        $selectors = [
-            'meta[property="article:published_time"]',
-            'meta[property="og:published_time"]',
-            'meta[name="publish_date"]',
-            'meta[name="date"]',
-            'meta[itemprop="datePublished"]',
-            'time[datetime]',
-        ];
-
-        foreach ($selectors as $selector) {
-            try {
-                $locator =
-                    $page
-                        ->locator($selector)
-                        ->first();
-
-                if (
-                    $locator->count() === 0
-                ) {
-                    continue;
-                }
-
-                $value = null;
-
-                /*
-                 * meta
-                 */
-                if (
-                    str_starts_with(
-                        $selector,
-                        'meta'
-                    )
-                ) {
-                    $value =
-                        $locator->getAttribute(
-                            'content'
-                        );
-                } else {
-                    $value =
-                        $locator->getAttribute(
-                            'datetime'
-                        );
-
-                    if (!$value) {
-                        $value =
-                            $locator->innerText();
-                    }
-                }
-
-                if (!$value) {
-                    continue;
-                }
-
-                return Carbon::parse(
-                    trim($value)
-                );
-
-            } catch (Throwable) {
-                continue;
-            }
+        } catch (Throwable $e) {
+            // ignore
         }
 
         /*
-         * اگر تاریخ از صفحه پیدا نشد،
-         * تاریخ صفحه لیست.
+         * برای Reader عمومی فعلاً متن صفحه را می‌گیریم.
          */
-        if (
-            !empty($item['date'])
-        ) {
-            try {
-                return Carbon::parse(
-                    $item['date']
-                );
-            } catch (Throwable) {
-            }
-        }
+        $content = '';
 
-        return null;
-    }
-
-    /**
-     * استخراج متن از یک locator
-     */
-    protected function extractText(
-        mixed $item,
-        string $selector
-    ): string {
         try {
-            $locator =
-                $item
-                    ->locator($selector)
-                    ->first();
+            $content = trim(
+                (string) $page
+                    ->locator('main')
+                    ->first()
+                    ->innerText()
+            );
+        } catch (Throwable $e) {
+            // fallback
+        }
 
-            if (
-                $locator->count() === 0
-            ) {
-                return '';
+        if ($content === '') {
+            try {
+                $content = trim(
+                    (string) $page
+                        ->locator('body')
+                        ->innerText()
+                );
+            } catch (Throwable $e) {
+                // ignore
             }
-
-            return trim(
-                $locator->innerText()
-            );
-
-        } catch (Throwable) {
-            return '';
         }
+
+        if ($title === '') {
+            $title = Str::limit($content, 100);
+        }
+
+        if ($content === '') {
+            return [];
+        }
+
+        return [
+            new
+            SourceItemData(
+                externalId: '',
+                title: $this->cleanText($title),
+                url: $source->url ?: null,
+                content: $content ?: null,
+                publishedAt: null,
+                rawData: null,
+            ),
+        ];
     }
 
     /**
-     * استخراج href
+     * گرفتن URL لیست از تنظیمات Source
      */
-    protected function extractHref(
-        mixed $item,
-        string $selector
-    ): string {
-        try {
-            $locator =
-                $item
-                    ->locator($selector)
-                    ->first();
+    private function getListUrl(Source $source): string
+    {
+        /*
+         * اگر در settings مقدار list_url تعریف شده باشد،
+         * همان را استفاده می‌کنیم.
+         */
+        $settings = $source->settings ?? [];
 
-            if (
-                $locator->count() === 0
-            ) {
-                return '';
-            }
-
-            return trim(
-                (string) (
-                    $locator->getAttribute(
-                        'href'
-                    ) ?? ''
-                )
-            );
-
-        } catch (Throwable) {
-            return '';
+        if (
+            is_array($settings)
+            && !empty($settings['list_url'])
+        ) {
+            return $settings['list_url'];
         }
+
+        /*
+         * در غیر این صورت خود URL منبع.
+         */
+        return $source->url;
     }
 
     /**
-     * URL نسبی → Absolute
+     * نرمال کردن URL
      */
-    protected function absoluteUrl(
-        string $baseUrl,
-        string $url
-    ): string {
-        $url =
-            trim($url);
-
-        if ($url === '') {
-            return '';
-        }
+    private function normalizeUrl(string $url): string
+    {
+        $url = trim($url);
 
         /*
-         * URL کامل
+         * حذف fragment
          */
-        if (
-            preg_match(
-                '~^https?://~i',
-                $url
-            )
-        ) {
-            return $url;
-        }
+        $url = preg_replace('/#.*$/', '', $url);
 
         /*
-         * //example.com
+         * حذف slash انتهایی
          */
-        if (
-            str_starts_with(
-                $url,
-                '//'
-            )
-        ) {
-            $scheme =
-                parse_url(
-                    $baseUrl,
-                    PHP_URL_SCHEME
-                ) ?: 'https';
+        $url = rtrim($url, '/');
 
-            return $scheme . ':' . $url;
-        }
-
-        $base =
-            parse_url(
-                $baseUrl
-            );
-
-        if (!$base) {
-            return $url;
-        }
-
-        $scheme =
-            $base['scheme']
-            ?? 'https';
-
-        $host =
-            $base['host']
-            ?? '';
-
-        $port =
-            isset($base['port'])
-                ? ':' . $base['port']
-                : '';
-
-        if (
-            str_starts_with(
-                $url,
-                '/'
-            )
-        ) {
-            return
-                $scheme .
-                '://' .
-                $host .
-                $port .
-                $url;
-        }
-
-        $path =
-            $base['path']
-            ?? '/';
-
-        $directory =
-            rtrim(
-                dirname($path),
-                '/'
-            );
-
-        return
-            $scheme .
-            '://' .
-            $host .
-            $port .
-            $directory .
-            '/' .
-            $url;
+        return $url;
     }
 
     /**
-     * شناسه پایدار خبر
+     * تمیز کردن متن معمولی
      */
-    protected function makeExternalId(
-        string $url,
-        array $item
-    ): string {
+    private function cleanText(string $text): string
+    {
         /*
-         * اگر سایت ID در DOM داشته باشد
-         * بعداً می‌توانیم این قسمت را توسعه دهیم.
+         * تبدیل NBSP
          */
-        return sha1(
-            trim($url)
+        $text = str_replace(
+            "\xc2\xa0",
+            ' ',
+            $text
         );
-    }
-
-    /**
-     * تمیز کردن متن
-     */
-    protected function cleanText(
-        ?string $text
-    ): string {
-        if (!$text) {
-            return '';
-        }
 
         /*
-         * NBSP
+         * تبدیل line ending
          */
-        $text =
-            str_replace(
-                "\xc2\xa0",
-                ' ',
-                $text
-            );
+        $text = str_replace(
+            ["\r\n", "\r"],
+            "\n",
+            $text
+        );
 
         /*
-         * Zero-width
+         * حذف فاصله‌های اضافی
          */
-        $text =
-            str_replace(
-                [
-                    "\u{200B}",
-                    "\u{200D}",
-                    "\u{FEFF}",
-                ],
-                '',
-                $text
-            );
+        $text = preg_replace(
+            "/[ \t]+/u",
+            ' ',
+            $text
+        );
 
         /*
-         * یکسان‌سازی فاصله
+         * بیش از دو خط خالی
          */
-        $text =
-            preg_replace(
-                '/[ \t]+/u',
-                ' ',
-                $text
-            ) ?? $text;
-
-        /*
-         * خطوط خالی زیاد
-         */
-        $text =
-            preg_replace(
-                "/\n{3,}/u",
-                "\n\n",
-                $text
-            ) ?? $text;
-
-        /*
-         * trim هر خط
-         */
-        $lines =
-            preg_split(
-                "/\r\n|\r|\n/u",
-                $text
-            );
-
-        if (
-            is_array($lines)
-        ) {
-            $lines =
-                array_map(
-                    static fn ($line) =>
-                        trim($line),
-                    $lines
-                );
-
-            $text =
-                implode(
-                    "\n",
-                    $lines
-                );
-        }
+        $text = preg_replace(
+            "/\n{3,}/u",
+            "\n\n",
+            $text
+        );
 
         return trim($text);
     }
 
     /**
-     * عنوان صفحه بدون ایجاد exception
+     * تمیز کردن متن صفحه خبر
      */
-    protected function safePageTitle(
-        mixed $page
-    ): ?string {
-        try {
-            return trim(
-                $page->title()
-            );
-        } catch (Throwable) {
-            return null;
+    private function cleanArticleText(
+        string $content,
+        string $title = ''
+    ): string {
+        $content = $this->cleanText($content);
+
+        if ($content === '') {
+            return '';
         }
+
+        /*
+         * حذف title از ابتدای متن،
+         * چون معمولاً h1 داخل article نیز وجود دارد.
+         */
+        if ($title !== '') {
+            $normalizedContent = trim($content);
+            $normalizedTitle = trim($title);
+
+            if (
+                str_starts_with(
+                    $normalizedContent,
+                    $normalizedTitle
+                )
+            ) {
+                $content = trim(
+                    mb_substr(
+                        $normalizedContent,
+                        mb_strlen($normalizedTitle)
+                    )
+                );
+            }
+        }
+
+        /*
+         * حذف چند عبارت رایج رابط کاربری.
+         *
+         * این بخش عمداً محدود است تا محتوای واقعی خبر حذف نشود.
+         */
+        $noise = [
+            'اشتراک‌گذاری',
+            'اشتراک گذاری',
+            'ارسال',
+            'نظر دهید',
+            'نظرات',
+        ];
+
+        foreach ($noise as $item) {
+            $content = preg_replace(
+                '/^' . preg_quote($item, '/') . '\s*/u',
+                '',
+                $content
+            );
+        }
+
+        return trim($content);
+    }
+
+    /**
+     * ذخیره HTML برای Debug
+     */
+    private function saveDebugHtml($page, string $name): void
+    {
+        try {
+            $html = $page->content();
+
+            $directory = storage_path(
+                'app/private/browser-debug'
+            );
+
+            if (!is_dir($directory)) {
+                mkdir(
+                    $directory,
+                    0775,
+                    true
+                );
+            }
+
+            $file = $directory . '/' .
+                $name . '-' .
+                date('Y-m-d-H-i-s') .
+                '.html';
+
+            file_put_contents(
+                $file,
+                $html
+            );
+
+            /*
+             * Screenshot هم ذخیره می‌کنیم.
+             */
+            try {
+                $page->screenshot([
+                    'path' => $directory . '/' .
+                        $name . '-' .
+                        date('Y-m-d-H-i-s') .
+                        '.png',
+                    'fullPage' => true,
+                ]);
+            } catch (Throwable $e) {
+                Log::warning(
+                    'Could not save browser screenshot',
+                    [
+                        'message' => $e->getMessage(),
+                    ]
+                );
+            }
+
+            Log::info(
+                'Browser debug files saved',
+                [
+                    'html' => $file,
+                ]
+            );
+        } catch (Throwable $e) {
+            Log::warning(
+                'Could not save browser debug HTML',
+                [
+                    'message' => $e->getMessage(),
+                ]
+            );
+        }
+    }
+
+    /**
+     * sleep میلی‌ثانیه‌ای
+     */
+    private function sleep(int $milliseconds): void
+    {
+        usleep($milliseconds * 1000);
     }
 }

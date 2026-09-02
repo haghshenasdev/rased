@@ -57,6 +57,7 @@ class SourceResource extends Resource
                         'html' => 'HTML',
                         'javascript' => 'JavaScript',
                         'browser' => 'browser',
+                        'farsnews' => 'farsnews',
                     ])
                     ->required()
                     ->live(),
@@ -69,7 +70,7 @@ class SourceResource extends Resource
                         fn ($get) =>
                         in_array(
                             $get('type'),
-                            ['rss', 'html', 'javascript','browser']
+                            ['rss', 'html', 'javascript','browser','farsnews']
                         )
                     )
                     ->required(
