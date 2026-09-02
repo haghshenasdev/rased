@@ -56,6 +56,7 @@ class SourceResource extends Resource
                         'eitaa' => 'کانال ایتا',
                         'html' => 'HTML',
                         'javascript' => 'JavaScript',
+                        'browser' => 'browser',
                     ])
                     ->required()
                     ->live(),
@@ -68,7 +69,7 @@ class SourceResource extends Resource
                         fn ($get) =>
                         in_array(
                             $get('type'),
-                            ['rss', 'html', 'javascript']
+                            ['rss', 'html', 'javascript','browser']
                         )
                     )
                     ->required(
