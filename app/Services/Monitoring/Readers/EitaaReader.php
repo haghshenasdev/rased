@@ -134,6 +134,11 @@ class EitaaReader implements SourceReaderInterface
                 $post['text'] ?? ''
             );
 
+            // تصویر و پروفایل متعلق به همین پست هستند و باید از آرایه
+            // parse شده خوانده شوند؛ متغیر محلی $featuredImage اینجا وجود ندارد.
+            $featuredImage = $post['featured_image_url'] ?? null;
+            $profileImage = $post['profile_image_url'] ?? null;
+
             if ($text === '') {
                 continue;
             }
@@ -363,6 +368,8 @@ class EitaaReader implements SourceReaderInterface
             $result[$id] = [
                 'text' => $text,
                 'date' => $datetime,
+                'featured_image_url' => $featuredImage,
+                'profile_image_url' => $profileImage,
             ];
         }
 
