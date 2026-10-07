@@ -77,9 +77,14 @@ class BaleBotService
      */
     public function sendPhotoByUrl($chatId, string $photoUrl, ?string $caption = null, ?array $keyboard = null): array
     {
-        $tempPath = null;
-        $tempUrl = null;
-
+        /**
+         * نام متد برای سازگاری با Jobهای فعلی حفظ شده است، اما عکس دیگر
+         * به صورت HTTP URL به بله ارسال نمی‌شود.
+         *
+         * بله برای sendPhoto رسماً multipart/form-data را پشتیبانی می‌کند.
+         * بنابراین تصویر را ابتدا از URL اصلی دانلود و مستقیماً به API بله
+         * آپلود می‌کنیم. URL اصلی تصویر در دیتابیس هیچ تغییری نمی‌کند.
+         */
         try {
             $download = Http::timeout(35)
                 ->connectTimeout(10)
@@ -96,7 +101,7 @@ class BaleBotService
                     '_error' => 'دانلود تصویر از URL اصلی ناموفق بود.',
                     '_http_body' => mb_substr($download->body(), 0, 2000),
                     '_photo_source_url' => $photoUrl,
-                    '_temporary_photo_url' => null,
+                    '_photo_upload_mode' => 'multipart/form-data',
                 ];
             }
 
@@ -108,7 +113,21 @@ class BaleBotService
                     '_http_status' => $download->status(),
                     '_error' => 'فایل تصویر خالی است.',
                     '_photo_source_url' => $photoUrl,
-                    '_temporary_photo_url' => null,
+                    '_photo_upload_mode' => 'multipart/form-data',
+                ];
+            }
+
+            $size = strlen($contents);
+
+            // طبق مستندات بله، سقف آپلود مستقیم تصویر 10MB است.
+            if ($size > 10 * 1024 * 1024) {
+                return [
+                    'ok' => false,
+                    '_http_status' => null,
+                    '_error' => 'حجم تصویر بیشتر از سقف ۱۰ مگابایت بله است.',
+                    '_photo_size' => $size,
+                    '_photo_source_url' => $photoUrl,
+                    '_photo_upload_mode' => 'multipart/form-data',
                 ];
             }
 
@@ -121,7 +140,7 @@ class BaleBotService
                     '_error' => 'فایل دریافت‌شده تصویر معتبر نیست یا MIME آن قابل تشخیص نیست.',
                     '_content_type' => $download->header('Content-Type'),
                     '_photo_source_url' => $photoUrl,
-                    '_temporary_photo_url' => null,
+                    '_photo_upload_mode' => 'multipart/form-data',
                 ];
             }
 
@@ -142,60 +161,57 @@ class BaleBotService
                     '_error' => "فرمت تصویر برای ارسال به بله پشتیبانی نشده است: {$mime}",
                     '_content_type' => $download->header('Content-Type'),
                     '_photo_source_url' => $photoUrl,
-                    '_temporary_photo_url' => null,
+                    '_photo_upload_mode' => 'multipart/form-data',
                 ];
             }
 
-            $directory = public_path('bale-temp');
-
-            if (!is_dir($directory) && !@mkdir($directory, 0755, true) && !is_dir($directory)) {
-                return [
-                    'ok' => false,
-                    '_http_status' => null,
-                    '_error' => 'امکان ساخت پوشه موقت public/bale-temp وجود ندارد.',
-                    '_photo_source_url' => $photoUrl,
-                    '_temporary_photo_url' => null,
-                ];
-            }
-
-            // پاک‌سازی فایل‌های قدیمی تا فایل موقت روی هاست جمع نشود.
-            $this->cleanupTemporaryBalePhotos($directory);
-
-            $filename = 'bale_' . bin2hex(random_bytes(16)) . '.' . $extension;
-            $tempPath = $directory . DIRECTORY_SEPARATOR . $filename;
-
-            if (@file_put_contents($tempPath, $contents) === false) {
-                return [
-                    'ok' => false,
-                    '_http_status' => null,
-                    '_error' => 'امکان ذخیره فایل موقت تصویر روی هاست وجود ندارد.',
-                    '_photo_source_url' => $photoUrl,
-                    '_temporary_photo_url' => null,
-                ];
-            }
-
-            $baseUrl = rtrim((string) config('app.url'), '/');
-            if ($baseUrl === '') {
-                $baseUrl = rtrim((string) env('APP_URL'), '/');
-            }
-
-            $tempUrl = $baseUrl . '/bale-temp/' . rawurlencode($filename);
+            $filename = 'rased_' . bin2hex(random_bytes(12)) . '.' . $extension;
 
             $data = [
                 'chat_id' => $chatId,
-                'photo' => $tempUrl,
             ];
 
-            if ($caption !== null) $data['caption'] = $caption;
-            if ($keyboard) $data['reply_markup'] = json_encode($keyboard, JSON_UNESCAPED_UNICODE);
+            if ($caption !== null) {
+                $data['caption'] = $caption;
+            }
 
-            $result = $this->request('sendPhoto', $data);
+            if ($keyboard) {
+                $data['reply_markup'] = json_encode(
+                    $keyboard,
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                );
+            }
 
-            // اطلاعات تشخیصی را نگه می‌داریم ولی خود فایل بعد از درخواست حذف می‌شود.
+            // ارسال مستقیم فایل با multipart/form-data؛ نیازی به URL عمومی موقت نیست.
+            $request = Http::timeout(45)
+                ->connectTimeout(10)
+                ->attach('photo', $contents, $filename, [
+                    'Content-Type' => $mime,
+                ]);
+
+            $response = $request->post($this->baseUrl . 'sendPhoto', $data);
+            $json = $response->json();
+
+            if (is_array($json)) {
+                $result = $json;
+                $result['_http_status'] = $response->status();
+            } else {
+                $result = [
+                    'ok' => false,
+                    '_http_status' => $response->status(),
+                    '_http_body' => mb_substr($response->body(), 0, 4000),
+                ];
+            }
+
             $result['_photo_source_url'] = $photoUrl;
-            $result['_temporary_photo_url'] = $tempUrl;
-            $result['_temporary_photo_mime'] = $mime;
-            $result['_temporary_photo_size'] = strlen($contents);
+            $result['_photo_upload_mode'] = 'multipart/form-data';
+            $result['_photo_mime'] = $mime;
+            $result['_photo_size'] = $size;
+            $result['_photo_filename'] = $filename;
+
+            if (!$response->successful() && !isset($result['_http_body'])) {
+                $result['_http_body'] = mb_substr($response->body(), 0, 4000);
+            }
 
             return $result;
         } catch (Throwable $e) {
@@ -205,12 +221,8 @@ class BaleBotService
                 '_exception' => get_class($e),
                 '_error' => $e->getMessage(),
                 '_photo_source_url' => $photoUrl,
-                '_temporary_photo_url' => $tempUrl,
+                '_photo_upload_mode' => 'multipart/form-data',
             ];
-        } finally {
-            if ($tempPath && is_file($tempPath)) {
-                @unlink($tempPath);
-            }
         }
     }
 
