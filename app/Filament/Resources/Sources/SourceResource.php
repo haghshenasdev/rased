@@ -191,6 +191,13 @@ class SourceResource extends Resource
             ]);
     }
 
+    public static function getRelations(): array
+    {
+        return [
+            \App\Filament\Resources\Sources\RelationManagers\MonitoringLogsRelationManager::class,
+        ];
+    }
+
     public static function getPages(): array
     {
         return [

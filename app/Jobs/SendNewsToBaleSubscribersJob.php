@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\BaleSubscriber;
 use App\Models\SourceItem;
 use App\Services\BaleBotService;
+use App\Services\BaleSendLogStore;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -29,7 +30,8 @@ class SendNewsToBaleSubscribersJob implements ShouldQueue
     }
 
     public function handle(
-        BaleBotService $bale
+        BaleBotService $bale,
+        BaleSendLogStore $logStore
     ): void {
 
         $item = SourceItem::query()
@@ -92,30 +94,21 @@ class SendNewsToBaleSubscribersJob implements ShouldQueue
                 /*
                  * ثبت زمان آخرین ارسال موفق
                  */
-                if (
-                    $result &&
-                    ($result['ok'] ?? false)
-                ) {
+                $ctx = [
+                    'chat_id' => (string) $subscriber->chat_id,
+                    'subscriber_id' => $subscriber->id,
+                    'has_image' => filled($item->featured_image_url),
+                    'featured_image_url' => $item->featured_image_url,
+                    'http_status' => $result['_http_status'] ?? null,
+                    'api_result' => $result,
+                    'mode' => 'automatic_subscribers',
+                ];
 
-                    $subscriber->update([
-                        'last_sent_at' => now(),
-                    ]);
-
+                if ($result && ($result['ok'] ?? false)) {
+                    $subscriber->update(['last_sent_at' => now()]);
+                    $logStore->record($item, 'success', 'ارسال خودکار به مشترک بله موفق بود.', $ctx);
                 } else {
-
-                    logger()->error(
-                        'ارسال خبر به مشترک بله ناموفق بود',
-                        [
-                            'subscriber_id' =>
-                                $subscriber->id,
-
-                            'source_item_id' =>
-                                $item->id,
-
-                            'result' =>
-                                $result,
-                        ]
-                    );
+                    $logStore->record($item, 'failed', 'ارسال خودکار به مشترک بله ناموفق بود: ' . json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $ctx);
                 }
 
             } catch (Throwable $e) {
@@ -124,19 +117,11 @@ class SendNewsToBaleSubscribersJob implements ShouldQueue
                  * خطای یک مشترک نباید
                  * ارسال برای مشترک‌های دیگر را متوقف کند.
                  */
-                logger()->error(
-                    'خطا در ارسال خبر به مشترک بله',
-                    [
-                        'subscriber_id' =>
-                            $subscriber->id,
-
-                        'source_item_id' =>
-                            $item->id,
-
-                        'error' =>
-                            $e->getMessage(),
-                    ]
-                );
+                $logStore->exception($item, $e, [
+                    'subscriber_id' => $subscriber->id,
+                    'chat_id' => (string) $subscriber->chat_id,
+                    'mode' => 'automatic_subscribers',
+                ]);
             }
         }
     }

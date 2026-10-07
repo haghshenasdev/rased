@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\BaleSubscriber;
 use App\Models\SourceItem;
 use App\Services\BaleBotService;
+use App\Services\BaleSendLogStore;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -35,7 +36,8 @@ class SendSelectedNewsToBaleJob implements ShouldQueue
     }
 
     public function handle(
-        BaleBotService $bale
+        BaleBotService $bale,
+        BaleSendLogStore $logStore
     ): void {
 
         $items = SourceItem::query()
@@ -112,30 +114,21 @@ class SendSelectedNewsToBaleJob implements ShouldQueue
                     /*
                      * ارسال موفق
                      */
-                    if (
-                        $result &&
-                        ($result['ok'] ?? false) === true
-                    ) {
+                    $ctx = [
+                        'chat_id' => (string) $subscriber->chat_id,
+                        'subscriber_id' => $subscriber->id,
+                        'has_image' => filled($item->featured_image_url),
+                        'featured_image_url' => $item->featured_image_url,
+                        'http_status' => $result['_http_status'] ?? null,
+                        'api_result' => $result,
+                        'mode' => 'manual_selected',
+                    ];
 
-                        $subscriber->update([
-                            'last_sent_at' => now(),
-                        ]);
-
+                    if ($result && ($result['ok'] ?? false) === true) {
+                        $subscriber->update(['last_sent_at' => now()]);
+                        $logStore->record($item, 'success', 'ارسال دستی خبر به بله موفق بود.', $ctx);
                     } else {
-
-                        logger()->error(
-                            'ارسال خبر به بله ناموفق بود',
-                            [
-                                'subscriber_id' =>
-                                    $subscriber->id,
-
-                                'source_item_id' =>
-                                    $item->id,
-
-                                'result' =>
-                                    $result,
-                            ]
-                        );
+                        $logStore->record($item, 'failed', 'ارسال دستی خبر به بله ناموفق بود: ' . json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $ctx);
                     }
 
                 } catch (Throwable $e) {
@@ -144,19 +137,11 @@ class SendSelectedNewsToBaleJob implements ShouldQueue
                      * خطای یک مشترک نباید
                      * ارسال بقیه را متوقف کند.
                      */
-                    logger()->error(
-                        'خطا در ارسال خبر انتخابی به بله',
-                        [
-                            'subscriber_id' =>
-                                $subscriber->id,
-
-                            'source_item_id' =>
-                                $item->id,
-
-                            'error' =>
-                                $e->getMessage(),
-                        ]
-                    );
+                    $logStore->exception($item, $e, [
+                        'subscriber_id' => $subscriber->id,
+                        'chat_id' => (string) $subscriber->chat_id,
+                        'mode' => 'manual_selected',
+                    ]);
                 }
             }
         }
@@ -288,18 +273,12 @@ class SendSelectedNewsToBaleJob implements ShouldQueue
         Throwable $exception
     ): void {
 
-        logger()->error(
-            'Job ارسال اخبار انتخابی به بله ناموفق شد',
-            [
-                'source_item_ids' =>
-                    $this->sourceItemIds,
-
-                'subscriber_ids' =>
-                    $this->subscriberIds,
-
-                'error' =>
-                    $exception->getMessage(),
-            ]
-        );
+        $firstItem = SourceItem::query()->with('source')->find($this->sourceItemIds[0] ?? 0);
+        app(BaleSendLogStore::class)->exception($firstItem, $exception, [
+            'mode' => 'manual_selected',
+            'source_item_ids' => $this->sourceItemIds,
+            'subscriber_ids' => $this->subscriberIds,
+            'job_failed' => true,
+        ]);
     }
 }

@@ -15,6 +15,17 @@ class MonitoringLog extends Model
         'status','error_type','message','context',
     ];
 
+    protected $casts = [
+        'context' => 'array',
+    ];
+
     public function monitoringRun(): BelongsTo { return $this->belongsTo(MonitoringRun::class); }
     public function source(): BelongsTo { return $this->belongsTo(Source::class); }
+
+    public function getOperationLabelAttribute(): string
+    {
+        return ($this->context['operation'] ?? null) === 'bale_send'
+            ? 'ارسال بله'
+            : 'خواندن منبع';
+    }
 }

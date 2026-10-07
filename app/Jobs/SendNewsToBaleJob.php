@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\SourceItem;
 use App\Services\BaleBotService;
+use App\Services\BaleSendLogStore;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -28,7 +29,8 @@ class SendNewsToBaleJob implements ShouldQueue
     }
 
     public function handle(
-        BaleBotService $bale
+        BaleBotService $bale,
+        BaleSendLogStore $logStore
     ): void {
 
         $item = SourceItem::query()
@@ -86,19 +88,23 @@ class SendNewsToBaleJob implements ShouldQueue
          * اگر API بله خطا داد،
          * Job را Failed کن تا دوباره تلاش شود.
          */
-        if (
-            !$result ||
-            ($result['ok'] ?? false) !== true
-        ) {
+        $logContext = [
+            'chat_id' => (string) $chatId,
+            'has_image' => filled($item->featured_image_url),
+            'featured_image_url' => $item->featured_image_url,
+            'http_status' => $result['_http_status'] ?? null,
+            'api_result' => $result,
+            'mode' => 'automatic',
+        ];
 
-            throw new \Exception(
-                'خطا در ارسال خبر به بله: ' .
-                json_encode(
-                    $result,
-                    JSON_UNESCAPED_UNICODE
-                )
-            );
+        if ($result && ($result['ok'] ?? false) === true) {
+            $logStore->record($item, 'success', 'ارسال خودکار خبر به بله موفق بود.', $logContext);
+            return;
         }
+
+        $message = 'ارسال خودکار خبر به بله ناموفق بود: ' . json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $logStore->record($item, 'failed', $message, $logContext);
+        throw new \Exception($message);
     }
 
     /**
@@ -177,15 +183,10 @@ class SendNewsToBaleJob implements ShouldQueue
         Throwable $exception
     ): void {
 
-        logger()->error(
-            'ارسال خبر به بله ناموفق بود',
-            [
-                'source_item_id' =>
-                    $this->sourceItemId,
-
-                'error' =>
-                    $exception->getMessage(),
-            ]
-        );
+        $item = SourceItem::query()->with('source')->find($this->sourceItemId);
+        app(BaleSendLogStore::class)->exception($item, $exception, [
+            'mode' => 'automatic',
+            'job_failed' => true,
+        ]);
     }
 }
