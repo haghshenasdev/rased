@@ -1,377 +1,65 @@
-<!DOCTYPE html>
-@php
-    use Morilog\Jalali\Jalalian;
-    use Illuminate\Support\Str;
-@endphp
+<!doctype html>
 <html lang="fa" dir="rtl">
-
 <head>
-
-    <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
-    <title>راصد | پایش هوشمند اخبار</title>
-
-    @vite([
-        'resources/css/home.css',
-        'resources/js/app.js'
-    ])
-
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ config('app.name', 'راصد') }}</title>
+<style>
+body{font-family:Tahoma,Arial,sans-serif;background:#f4f6f8;margin:0;color:#17202a}
+.container{max-width:1280px;margin:auto;padding:20px}
+h1{margin:0 0 16px}.sources{display:flex;gap:10px;overflow:auto;padding:6px 0 18px}
+.source{background:#fff;border-radius:14px;padding:9px 12px;display:flex;align-items:center;gap:8px;white-space:nowrap;border:1px solid #e5e7eb}
+.source img{width:42px;height:42px;border-radius:50%;object-fit:cover}.source .fallback{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;background:#e8eef5}
+.filters{background:#fff;padding:14px;border-radius:14px;margin-bottom:16px;display:flex;gap:8px}.filters input{flex:1;padding:10px;border:1px solid #ddd;border-radius:8px}.filters button,.filters a{padding:10px 14px;border:0;border-radius:8px;text-decoration:none;background:#17202a;color:white}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:16px}.card{background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb}.card img{width:100%;height:180px;object-fit:cover}.body{padding:15px}.meta{font-size:12px;color:#68737d;margin-bottom:8px}.badge{display:inline-block;padding:3px 7px;border-radius:999px;background:#eef2ff;margin-left:5px}.repost{background:#fff3cd;color:#805b00}.title{font-size:18px;font-weight:700;line-height:1.7}.desc{font-size:14px;line-height:1.9;color:#48515a;margin-top:8px}.more{display:block;margin-top:12px;text-decoration:none;color:#1769aa}.pagination{margin-top:20px}
+</style>
 </head>
-
 <body>
-
-<div class="background"></div>
-
-<header class="site-header">
-
-    <div class="container">
-
-        <nav class="navbar glass">
-
-            <a
-                href="{{ route('home') }}"
-                class="logo"
-            >
-
-                <div class="logo-icon">
-                    ر
-                </div>
-
-                <div>
-
-                    <div class="logo-title">
-                        راصد
-                    </div>
-
-                    <div class="logo-subtitle">
-                        سامانه پایش اخبار
-                    </div>
-
-                </div>
-
-            </a>
-
-
-            <div class="nav-actions">
-
-                <a
-                    href="{{ route('home') }}"
-                    class="nav-link"
-                >
-                    اخبار
-                </a>
-
-                <a
-                    href="#about"
-                    class="nav-link"
-                >
-                    درباره راصد
-                </a>
-
-            </div>
-
-        </nav>
-
-    </div>
-
-</header>
-
-
-<section class="hero">
-
-    <div class="container">
-
-        <div class="status-pill">
-
-            <span class="status-dot"></span>
-
-            پایش لحظه‌ای منابع خبری
-
-        </div>
-
-
-        <h1>
-
-            تمام اخبار مهم،
-
-            <br>
-
-            <span class="gradient-text">
-                یکجا زیر نظر شما
-            </span>
-
-        </h1>
-
-
-        <p class="hero-description">
-
-            راصد منابع خبری و کانال‌های مختلف را
-            پایش می‌کند و مطالب مرتبط با کلمات
-            کلیدی را به صورت هوشمند جمع‌آوری می‌کند.
-
-        </p>
-
-
-        <form
-            action="{{ route('home') }}"
-            method="GET"
-            class="search-box"
-        >
-
-            <span class="search-icon">
-                🔍
-            </span>
-
-            <input
-                type="text"
-                name="search"
-                value="{{ request('search') }}"
-                placeholder="جستجو در عنوان، متن و کلمات کلیدی..."
-            >
-
-        </form>
-
-    </div>
-
-</section>
-
-
-<main class="container">
-
-    {{-- Statistics --}}
-
-    <div class="stats">
-
-        <div class="stat glass">
-
-            <div class="stat-number">
-                {{ $items->total() }}
-            </div>
-
-            <div class="stat-label">
-                خبر پیدا شده
-            </div>
-
-        </div>
-
-
-        <div class="stat glass">
-
-            <div class="stat-number">
-                {{ \App\Models\Source::where('is_active', true)->count() }}
-            </div>
-
-            <div class="stat-label">
-                منبع فعال
-            </div>
-
-        </div>
-
-
-        <div class="stat glass">
-
-            <div class="stat-number">
-                {{ \App\Models\SourceItem::whereDate('created_at', today())->count() }}
-            </div>
-
-            <div class="stat-label">
-                خبر امروز
-            </div>
-
-        </div>
-
-    </div>
-
-
-    {{-- Filters --}}
-
-    <div class="filters">
-
-        <a
-            href="{{ route('home') }}"
-            class="filter {{ !request('period') ? 'active' : '' }}"
-        >
-            همه
-        </a>
-
-        <a
-            href="{{ route('home', ['period' => 'today']) }}"
-            class="filter {{ request('period') === 'today' ? 'active' : '' }}"
-        >
-            امروز
-        </a>
-
-        <a
-            href="{{ route('home', ['period' => 'yesterday']) }}"
-            class="filter {{ request('period') === 'yesterday' ? 'active' : '' }}"
-        >
-            دیروز
-        </a>
-
-        <a
-            href="{{ route('home', ['period' => 'week']) }}"
-            class="filter {{ request('period') === 'week' ? 'active' : '' }}"
-        >
-            هفته اخیر
-        </a>
-
-    </div>
-
-
-    {{-- News --}}
-
-    <div class="news-grid">
-
-        @forelse($items as $item)
-
-            <article class="news-card glass">
-
-                <div class="news-meta">
-
-                    <div class="source">
-
-                        <div class="source-icon">
-
-                            {{ mb_substr(
-                                $item->source->name ?? '؟',
-                                0,
-                                1
-                            ) }}
-
-                        </div>
-
-                        <div>
-
-                            <div class="source-name">
-                                {{ $item->source->name ?? 'منبع نامشخص' }}
-                            </div>
-
-                            <div class="news-time">
-
-                                @if($item->published_at)
-                                    {{ Jalalian::fromCarbon($item->published_at)->ago() }}
-                                @endif
-
-                            </div>
-
-                        </div>
-
-                    </div>
-
-
-                    @if($item->matched_keyword)
-
-                        <span class="keyword">
-
-                            {{ $item->matched_keyword }}
-
-                        </span>
-
-                    @endif
-
-                </div>
-
-
-                <a
-                    href="{{ $item->url ?? '#' }}"
-                    class="news-title"
-                >
-
-                    {{ Str::limit($item->title, 300, '...') }}
-
-                </a>
-
-
-                @if($item->matched_content)
-
-                    <div class="matched-content">
-
-                        {{ Str::limit($item->matched_content, 300, '...') }}
-
-                    </div>
-
-                @endif
-
-
-                <div class="news-footer">
-
-                    <span class="news-date">
-
-    @if($item->published_at)
-                            {{ Jalalian::fromCarbon($item->published_at)->format('Y/m/d H:i') }}
-                        @endif
-
-</span>
-
-
-                    @if($item->url)
-
-                        <a
-                            href="{{ $item->url }}"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="source-link"
-                        >
-                            <span>مشاهده منبع</span>
-                            <span class="source-link-arrow">←</span>
-                        </a>
-
-                    @endif
-
-                </div>
-
-            </article>
-
-        @empty
-
-            <div class="empty glass">
-
-                <div class="empty-icon">
-                    🔎
-                </div>
-
-                <div class="empty-title">
-                    خبری پیدا نشد
-                </div>
-
-                <div class="empty-text">
-                    هنوز مطلبی مطابق معیارهای جستجو پیدا نشده است
-                </div>
-
-            </div>
-
-        @endforelse
-
-    </div>
-
-
-    <div class="pagination">
-
-        {{ $items->links() }}
-
-    </div>
-
-</main>
-
-
-<footer
-    id="about"
-    class="site-footer"
->
-
-    <div class="container">
-
-        راصد · سامانه پایش و گردآوری هوشمند اخبار
-
-    </div>
-
-</footer>
-
+<div class="container">
+<h1>📰 {{ config('app.name','راصد') }}</h1>
+
+<div class="sources">
+@foreach($sources as $source)
+<a class="source" href="{{ route('home', ['search'=>$source->name]) }}">
+    @if($source->profileImage())
+        <img src="{{ $source->profileImage() }}" alt="">
+    @else
+        <span class="fallback">📡</span>
+    @endif
+    <span>{{ $source->parent?->name ? $source->parent->name.' / ' : '' }}{{ $source->name }}</span>
+</a>
+@endforeach
+</div>
+
+<form class="filters" method="get">
+<input name="search" value="{{ request('search') }}" placeholder="جستجو...">
+<button>جستجو</button>
+<a href="{{ route('home') }}">همه</a>
+</form>
+
+<div class="grid">
+@forelse($items as $item)
+<article class="card">
+@if($item->featured_image_url)
+<img src="{{ $item->featured_image_url }}" alt="" loading="lazy">
+@endif
+<div class="body">
+<div class="meta">
+{{ $item->source?->name }}
+@if($item->category) <span class="badge">{{ $item->category->name }}</span> @endif
+@if($item->is_repost) <span class="badge repost">🔁 بازنشر</span> @endif
+@if($item->published_at) · {{ \Morilog\Jalali\Jalalian::fromCarbon($item->published_at->setTimezone('Asia/Tehran'))->format('Y/m/d H:i') }} @endif
+</div>
+<div class="title">{{ $item->title }}</div>
+<div class="desc">{{ \Illuminate\Support\Str::limit(strip_tags($item->content ?? $item->matched_content ?? ''), 260) }}</div>
+<a class="more" href="{{ route('news.show',$item) }}">مشاهده خبر ←</a>
+</div>
+</article>
+@empty
+<p>خبری پیدا نشد.</p>
+@endforelse
+</div>
+<div class="pagination">{{ $items->links() }}</div>
+</div>
 </body>
-
 </html>

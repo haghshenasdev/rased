@@ -2,83 +2,47 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Source;
 use App\Models\SourceItem;
 use Illuminate\Http\Request;
 
 class HomeController extends Controller
 {
-    public function index(Request $request): \Illuminate\Contracts\View\Factory|\Illuminate\Contracts\View\View
+    public function index(Request $request)
     {
         $query = SourceItem::query()
-            ->with('source')
+            ->with(['source.parent', 'category', 'original'])
             ->latest('published_at');
 
-        /*
-         * جستجو
-         */
         if ($request->filled('search')) {
-
-            $search = trim(
-                $request->input('search')
-            );
-
+            $search = trim($request->input('search'));
             $query->where(function ($q) use ($search) {
-
-                $q->where(
-                    'title',
-                    'like',
-                    "%{$search}%"
-                );
-
-                $q->orWhere(
-                    'matched_content',
-                    'like',
-                    "%{$search}%"
-                );
-
-                $q->orWhere(
-                    'matched_keyword',
-                    'like',
-                    "%{$search}%"
-                );
+                $q->where('title', 'like', "%{$search}%")
+                    ->orWhere('content', 'like', "%{$search}%")
+                    ->orWhere('matched_keyword', 'like', "%{$search}%");
             });
         }
 
-        /*
-         * فیلتر زمانی
-         */
-        if ($request->get('period') === 'today') {
-
-            $query->whereDate(
-                'published_at',
-                today()
-            );
+        $period = $request->get('period');
+        $now = now('Asia/Tehran');
+        if ($period === 'today') {
+            $query->whereBetween('published_at', [$now->copy()->startOfDay(), $now->copy()->endOfDay()]);
+        } elseif ($period === 'yesterday') {
+            $day = $now->copy()->subDay();
+            $query->whereBetween('published_at', [$day->startOfDay(), $day->endOfDay()]);
+        } elseif ($period === 'week') {
+            $query->where('published_at', '>=', $now->copy()->subDays(7));
         }
 
-        if ($request->get('period') === 'yesterday') {
+        $items = $query->paginate(24)->withQueryString();
 
-            $query->whereDate(
-                'published_at',
-                today()->subDay()
-            );
-        }
+        $sources = Source::query()
+            ->where('is_active', true)
+            ->with('parent')
+            ->orderBy('parent_id')
+            ->orderBy('name')
+            ->get();
 
-        if ($request->get('period') === 'week') {
-
-            $query->where(
-                'published_at',
-                '>=',
-                now()->subDays(7)
-            );
-        }
-
-        $items = $query
-            ->paginate(20)
-            ->withQueryString();
-
-        return view(
-            'home',
-            compact('items')
-        );
+        return view('home', compact('items', 'sources'));
     }
 }

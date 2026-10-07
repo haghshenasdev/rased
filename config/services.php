@@ -2,6 +2,11 @@
 
 return [
 
+    'google_search' => [
+        'key' => env('GOOGLE_SEARCH_API_KEY'),
+        'cx' => env('GOOGLE_SEARCH_CX'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

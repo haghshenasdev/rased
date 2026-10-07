@@ -162,12 +162,16 @@ class EitaaReader implements SourceReaderInterface
 
                 content: $text,
 
-                publishedAt: $publishedAt,
+                publishedAt: $publishedAt?->setTimezone('Asia/Tehran'),
+
+                featuredImageUrl: $featuredImage,
 
                 rawData: [
                     'channel' => $channel,
                     'post_id' => $id,
                     'datetime' => $date,
+                    'featured_image_url' => $featuredImage,
+                    'profile_image_url' => $profileImage,
                 ],
             );
         }
@@ -304,8 +308,10 @@ class EitaaReader implements SourceReaderInterface
             /*
              * متن پیام
              */
+            // فقط متن اصلی پست؛
+            // js-message_reply_text عمداً نادیده گرفته می‌شود.
             $textNode = $xpath->query(
-                './/div[contains(@class, "etme_widget_message_text")]',
+                './/div[contains(concat(" ", normalize-space(@class), " "), " js-message_text ")]',
                 $message
             )->item(0);
 
@@ -316,6 +322,27 @@ class EitaaReader implements SourceReaderInterface
             $text = trim(
                 $textNode->textContent
             );
+
+            $featuredImage = null;
+            $photo = $xpath->query(
+                './/*[contains(@class, "etme_widget_message_photo_wrap")]',
+                $message
+            )->item(0);
+            if ($photo) {
+                $style = $photo->getAttribute('style');
+                if (preg_match('/background-image\s*:\s*url\([\'"]?([^\'")]+)[\'"]?\)/i', $style, $m)) {
+                    $featuredImage = $this->absoluteUrl($m[1]);
+                }
+            }
+
+            $profileImage = null;
+            $profile = $xpath->query(
+                './/div[contains(@class, "etme_widget_message_user_photo")]//img',
+                $message
+            )->item(0);
+            if ($profile) {
+                $profileImage = $this->absoluteUrl($profile->getAttribute('src'));
+            }
 
             /*
              * تاریخ
@@ -384,6 +411,13 @@ class EitaaReader implements SourceReaderInterface
         }
 
         return $result;
+    }
+
+    protected function absoluteUrl(string $url): string
+    {
+        if ($url === '') return '';
+        if (preg_match('#^https?://#i', $url)) return $url;
+        return 'https://eitaa.com/' . ltrim($url, '/');
     }
 
     protected function cleanText(string $text): string

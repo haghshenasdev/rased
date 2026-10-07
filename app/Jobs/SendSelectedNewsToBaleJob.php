@@ -87,8 +87,14 @@ class SendSelectedNewsToBaleJob implements ShouldQueue
                                 ],
                             ]);
 
-                        $result =
-                            $bale->sendWithKeyboard(
+                        $result = $item->featured_image_url
+                            ? $bale->sendPhotoByUrl(
+                                $subscriber->chat_id,
+                                $item->featured_image_url,
+                                $text,
+                                $keyboard
+                            )
+                            : $bale->sendWithKeyboard(
                                 $subscriber->chat_id,
                                 $text,
                                 $keyboard

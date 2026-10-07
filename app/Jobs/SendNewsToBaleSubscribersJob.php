@@ -72,24 +72,21 @@ class SendNewsToBaleSubscribersJob implements ShouldQueue
                  * اگر لینک خبر وجود داشته باشد،
                  * پیام همراه با Inline Keyboard ارسال می‌شود.
                  */
-                if ($keyboard) {
-
+                if ($item->featured_image_url) {
+                    $result = $bale->sendPhotoByUrl(
+                        $subscriber->chat_id,
+                        $item->featured_image_url,
+                        $text,
+                        $keyboard
+                    );
+                } elseif ($keyboard) {
                     $result = $bale->sendWithKeyboard(
                         $subscriber->chat_id,
                         $text,
                         $keyboard
                     );
-
                 } else {
-
-                    /*
-                     * اگر URL وجود نداشت،
-                     * پیام بدون دکمه ارسال می‌شود.
-                     */
-                    $result = $bale->sendMessage(
-                        $subscriber->chat_id,
-                        $text
-                    );
+                    $result = $bale->sendMessage($subscriber->chat_id, $text);
                 }
 
                 /*

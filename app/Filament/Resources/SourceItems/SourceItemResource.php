@@ -5,6 +5,7 @@ namespace App\Filament\Resources\SourceItems;
 use App\Filament\Resources\SourceItems\Pages;
 use App\Jobs\SendSelectedNewsToBaleJob;
 use App\Models\BaleSubscriber;
+use App\Models\Category;
 use App\Models\SourceItem;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -14,6 +15,7 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\CheckboxList;
+use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
@@ -46,7 +48,12 @@ class SourceItemResource extends Resource
     ): Schema {
 
         return $schema
-            ->components([]);
+            ->components([
+                Select::make('category_id')
+                    ->label('دسته‌بندی')
+                    ->options(fn () => Category::where('is_active', true)->pluck('name', 'id'))
+                    ->searchable()->nullable(),
+            ]);
     }
 
     public static function table(
@@ -81,6 +88,17 @@ class SourceItemResource extends Resource
                     ->label('کلمه کلیدی')
                     ->badge()
                     ->searchable(),
+
+                TextColumn::make('category.name')
+                    ->label('دسته')
+                    ->badge()
+                    ->placeholder('-'),
+
+                TextColumn::make('is_repost')
+                    ->label('بازنشر')
+                    ->badge()
+                    ->formatStateUsing(fn ($state) => $state ? '🔁 بازنشر' : 'خبر اصلی')
+                    ->color(fn ($state) => $state ? 'warning' : 'success'),
 
                 /*
                  * پاراگراف مرتبط
@@ -277,6 +295,7 @@ class SourceItemResource extends Resource
                  * مشاهده
                  */
                 ViewAction::make(),
+                \Filament\Actions\EditAction::make(),
 
                 /*
                  * حذف
@@ -484,6 +503,10 @@ class SourceItemResource extends Resource
             'view' =>
                 Pages\ViewSourceItem::route(
                     '/{record}'
+                ),
+            'edit' =>
+                Pages\EditSourceItem::route(
+                    '/{record}/edit'
                 ),
         ];
     }

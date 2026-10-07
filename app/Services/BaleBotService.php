@@ -76,6 +76,23 @@ class BaleBotService
         ]);
     }
 
+    public function sendPhotoByUrl(
+        $chatId,
+        string $photoUrl,
+        ?string $caption = null,
+        ?array $keyboard = null
+    ) {
+        $data = [
+            'chat_id' => $chatId,
+            'photo' => $photoUrl,
+        ];
+        if ($caption !== null) $data['caption'] = $caption;
+        if ($keyboard) {
+            $data['reply_markup'] = json_encode($keyboard, JSON_UNESCAPED_UNICODE);
+        }
+        return $this->request('sendPhoto', $data);
+    }
+
     /**
      * ارسال فایل از URL
      */

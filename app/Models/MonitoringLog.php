@@ -11,22 +11,10 @@ class MonitoringLog extends Model
     use HasFactory;
 
     protected $fillable = [
-        'monitoring_run_id',
-        'source_id',
-        'items_read',
-        'items_matched',
-        'items_saved',
-        'status',
-        'message',
+        'monitoring_run_id','source_id','items_read','items_matched','items_saved',
+        'status','error_type','message','context',
     ];
 
-    public function monitoringRun(): BelongsTo
-    {
-        return $this->belongsTo(MonitoringRun::class);
-    }
-
-    public function source(): BelongsTo
-    {
-        return $this->belongsTo(Source::class);
-    }
+    public function monitoringRun(): BelongsTo { return $this->belongsTo(MonitoringRun::class); }
+    public function source(): BelongsTo { return $this->belongsTo(Source::class); }
 }

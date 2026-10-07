@@ -12,9 +12,9 @@ class SourceItemData
         public readonly ?string $url = null,
         public readonly ?string $content = null,
         public readonly ?Carbon $publishedAt = null,
+        public readonly ?string $featuredImageUrl = null,
         public readonly array $rawData = [],
-    ) {
-    }
+    ) {}
 
     public function toArray(): array
     {
@@ -24,6 +24,7 @@ class SourceItemData
             'url' => $this->url,
             'content' => $this->content,
             'published_at' => $this->publishedAt,
+            'featured_image_url' => $this->featuredImageUrl,
             'raw_data' => $this->rawData,
         ];
     }

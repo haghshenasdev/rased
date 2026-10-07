@@ -6,6 +6,7 @@ use App\Filament\Resources\SourceItems\SourceItemResource;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Schema;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Infolists\Components\ImageEntry;
 
 class ViewSourceItem extends ViewRecord
 {
@@ -27,6 +28,20 @@ class ViewSourceItem extends ViewRecord
                 TextEntry::make('matched_keyword')
                     ->label('کلمه کلیدی')
                     ->badge(),
+
+                TextEntry::make('category.name')
+                    ->label('دسته‌بندی')
+                    ->badge(),
+
+                TextEntry::make('similarity_percent')
+                    ->label('درصد تشابه')
+                    ->suffix('%')
+                    ->visible(fn ($record) => (bool)$record->is_repost),
+
+                ImageEntry::make('featured_image_url')
+                    ->label('تصویر شاخص')
+                    ->visible(fn ($record) => filled($record->featured_image_url))
+                    ->columnSpanFull(),
 
                 TextEntry::make('published_at')
                     ->label('تاریخ انتشار')

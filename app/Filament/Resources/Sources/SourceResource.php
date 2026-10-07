@@ -3,13 +3,21 @@
 namespace App\Filament\Resources\Sources;
 
 use App\Filament\Resources\Sources\Pages;
+use App\Models\Category;
 use App\Models\Source;
 use App\Services\Monitoring\Readers\SourceReaderFactory;
 use BackedEnum;
 use Filament\Actions\Action;
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
+use Filament\Actions\EditAction;
+use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Actions;
@@ -17,467 +25,178 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
 use Throwable;
 
 class SourceResource extends Resource
 {
     protected static ?string $model = Source::class;
-
-    protected static string|BackedEnum|null $navigationIcon =
-        'heroicon-o-rss';
-
-    protected static ?string $navigationLabel =
-        'منابع';
-
-    protected static ?string $modelLabel =
-        'منبع';
-
-    protected static ?string $pluralModelLabel =
-        'منابع';
-
-    protected static string|null|\UnitEnum $navigationGroup =
-        'مانیتورینگ';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-rss';
+    protected static ?string $navigationLabel = 'منابع';
+    protected static ?string $modelLabel = 'منبع';
+    protected static ?string $pluralModelLabel = 'منابع';
+    protected static string|null|\UnitEnum $navigationGroup = 'مانیتورینگ';
 
     public static function form(Schema $schema): Schema
     {
-        return $schema
-            ->components([
+        return $schema->components([
+            TextInput::make('name')->label('نام منبع')->required()->maxLength(255),
 
-                TextInput::make('name')
-                    ->label('نام منبع')
-                    ->required()
-                    ->maxLength(255),
-
-                Select::make('type')
-                    ->label('نوع منبع')
-                    ->options([
-                        'rss' => 'RSS',
-                        'eitaa' => 'کانال ایتا',
-                        'html' => 'HTML',
-                        'javascript' => 'JavaScript',
-                        'browser' => 'browser',
-                        'farsnews' => 'farsnews',
-                    ])
-                    ->required()
-                    ->live(),
-
-                TextInput::make('url')
-                    ->label('آدرس منبع')
-                    ->placeholder('https://example.com/feed')
-                    ->url()
-                    ->visible(
-                        fn ($get) =>
-                        in_array(
-                            $get('type'),
-                            ['rss', 'html', 'javascript','browser','farsnews']
-                        )
-                    )
-                    ->required(
-                        fn ($get) =>
-                        in_array(
-                            $get('type'),
-                            ['rss', 'html', 'javascript']
-                        )
-                    ),
-
-                TextInput::make('identifier')
-                    ->label('شناسه کانال ایتا')
-                    ->placeholder('Hamase4')
-                    ->helperText(
-                        'نام کانال را بدون https://eitaa.com/ وارد کنید.'
-                    )
-                    ->visible(
-                        fn ($get) =>
-                            $get('type') === 'eitaa'
-                    )
-                    ->required(
-                        fn ($get) =>
-                            $get('type') === 'eitaa'
-                    ),
-
-                Toggle::make('is_active')
-                    ->label('فعال')
-                    ->default(true),
-
-                /*
-                 * دکمه تست خواندن منبع
-                 */
-                Actions::make([
-                    Action::make('testSource')
-                        ->label('تست خواندن منبع')
-                        ->icon('heroicon-o-beaker')
-                        ->color('info')
-                        ->button()
-
-                        ->action(
-                            function (
-                                $livewire,
-                                $get
-                            ) {
-
-                                /*
-                                 * دریافت اطلاعات فعلی فرم
-                                 */
-                                $name = $get('name');
-                                $type = $get('type');
-                                $url = $get('url');
-                                $identifier = $get('identifier');
-
-                                /*
-                                 * بررسی اطلاعات اولیه
-                                 */
-                                if (!$type) {
-
-                                    Notification::make()
-                                        ->title('نوع منبع مشخص نشده است')
-                                        ->body(
-                                            'ابتدا نوع منبع را انتخاب کنید.'
-                                        )
-                                        ->danger()
-                                        ->send();
-
-                                    return;
-                                }
-
-                                if (
-                                    in_array(
-                                        $type,
-                                        ['rss', 'html', 'javascript']
-                                    )
-                                    && !$url
-                                ) {
-
-                                    Notification::make()
-                                        ->title('آدرس منبع وارد نشده است')
-                                        ->body(
-                                            'برای این نوع منبع باید آدرس URL وارد کنید.'
-                                        )
-                                        ->danger()
-                                        ->send();
-
-                                    return;
-                                }
-
-                                if (
-                                    $type === 'eitaa'
-                                    && !$identifier
-                                ) {
-
-                                    Notification::make()
-                                        ->title('شناسه کانال وارد نشده است')
-                                        ->body(
-                                            'شناسه کانال ایتا را وارد کنید.'
-                                        )
-                                        ->danger()
-                                        ->send();
-
-                                    return;
-                                }
-
-                                try {
-
-                                    /*
-                                     * Source موقت
-                                     *
-                                     * هنوز چیزی در دیتابیس ذخیره نمی‌شود.
-                                     */
-                                    $source = new Source();
-
-                                    $source->name =
-                                        $name ?: 'تست منبع';
-
-                                    $source->type =
-                                        $type;
-
-                                    $source->url =
-                                        $url;
-
-                                    $source->identifier =
-                                        $identifier;
-
-                                    $source->is_active =
-                                        true;
-
-                                    /*
-                                     * Reader واقعی پروژه
-                                     */
-                                    $factory =
-                                        app(SourceReaderFactory::class);
-
-                                    $reader =
-                                        $factory->make($source);
-
-                                    /*
-                                     * خواندن واقعی منبع
-                                     */
-                                    $items =
-                                        $reader->read($source);
-
-                                    /*
-                                     * اگر چیزی برنگردد
-                                     */
-                                    if (empty($items)) {
-
-                                        Notification::make()
-                                            ->title(
-                                                'اتصال موفق بود اما مطلبی دریافت نشد'
-                                            )
-                                            ->body(
-                                                'Reader اجرا شد ولی هیچ پستی برای تحلیل برنگرداند.'
-                                            )
-                                            ->warning()
-                                            ->persistent()
-                                            ->send();
-
-                                        return;
-                                    }
-
-                                    /*
-                                     * تعداد مطالب
-                                     */
-                                    $count =
-                                        count($items);
-
-                                    /*
-                                     * نمایش چند مطلب اول
-                                     */
-                                    $preview = '';
-
-                                    foreach (
-                                        array_slice(
-                                            $items,
-                                            0,
-                                            5
-                                        )
-                                        as $index => $item
-                                    ) {
-
-                                        $title =
-                                            $item->title
-                                            ?? 'بدون عنوان';
-
-                                        $externalId =
-                                            $item->externalId
-                                            ?? '-';
-
-                                        $preview .=
-                                            ($index + 1)
-                                            . '. '
-                                            . $title
-                                            . "\n";
-
-                                        $preview .=
-                                            "ID: "
-                                            . $externalId
-                                            . "\n\n";
-                                    }
-
-                                    /*
-                                     * موفقیت
-                                     */
-                                    Notification::make()
-                                        ->title(
-                                            '✅ خواندن منبع موفق بود'
-                                        )
-                                        ->body(
-                                            "تعداد مطالب دریافت‌شده: {$count}\n\n"
-                                            . $preview
-                                        )
-                                        ->success()
-                                        ->persistent()
-                                        ->send();
-
-                                } catch (Throwable $e) {
-
-                                    /*
-                                     * ثبت خطا در Laravel Log
-                                     */
-                                    report($e);
-
-                                    /*
-                                     * نمایش خطا به کاربر
-                                     */
-                                    Notification::make()
-                                        ->title(
-                                            '❌ خطا در خواندن منبع'
-                                        )
-                                        ->body(
-                                            $e->getMessage()
-                                        )
-                                        ->danger()
-                                        ->persistent()
-                                        ->send();
-                                }
-                            }
-                        ),
+            Select::make('type')
+                ->label('نوع منبع')
+                ->options([
+                    'rss' => 'RSS',
+                    'google' => 'Google Search',
+                    'eitaa' => 'کانال ایتا',
+                    'html' => 'HTML',
+                    'javascript' => 'JavaScript',
+                    'browser' => 'Browser',
+                    'farsnews' => 'FarsNews',
                 ])
-                    ->columnSpanFull(),
+                ->required()->live(),
 
-            ]);
+            Select::make('parent_id')
+                ->label('زیرمجموعه منبع')
+                ->options(fn (?Source $record) => Source::query()
+                    ->when($record, fn ($q) => $q->where('id', '!=', $record->id))
+                    ->orderBy('name')->pluck('name', 'id'))
+                ->searchable()->nullable()
+                ->helperText('برای ساخت ساختار خبرگزاری ← RSS/کانال‌های زیرمجموعه استفاده کنید.'),
+
+            TextInput::make('url')
+                ->label('آدرس اصلی')
+                ->placeholder('https://example.com/feed')
+                ->url()
+                ->visible(fn ($get) => in_array($get('type'), ['rss','html','javascript','browser','farsnews']))
+                ->required(fn ($get) => in_array($get('type'), ['html','javascript','browser','farsnews'])),
+
+            Repeater::make('settings.feed_urls')
+                ->label('RSS / لینک‌های اضافی')
+                ->simple(TextInput::make('url')->label('URL')->url()->required())
+                ->visible(fn ($get) => $get('type') === 'rss')
+                ->helperText('یک منبع می‌تواند چند RSS یا لینک برای بررسی داشته باشد.')
+                ->addActionLabel('افزودن RSS'),
+
+            TextInput::make('identifier')
+                ->label('شناسه کانال ایتا')
+                ->placeholder('farsna')
+                ->visible(fn ($get) => $get('type') === 'eitaa')
+                ->required(fn ($get) => $get('type') === 'eitaa'),
+
+            TextInput::make('settings.query')
+                ->label('کلمه کلیدی Google')
+                ->placeholder('مثلاً حاجی دلیگانی')
+                ->visible(fn ($get) => $get('type') === 'google')
+                ->required(fn ($get) => $get('type') === 'google'),
+
+            TextInput::make('settings.count')
+                ->label('تعداد نتیجه Google')
+                ->numeric()->minValue(1)->maxValue(10)->default(10)
+                ->visible(fn ($get) => $get('type') === 'google'),
+
+            FileUpload::make('profile_image_path')
+                ->label('عکس پروفایل منبع')
+                ->image()->disk('public')->directory('source-profiles')
+                ->imageEditor()->nullable(),
+
+            TextInput::make('profile_image_url')
+                ->label('یا لینک عکس پروفایل')
+                ->url()->nullable(),
+
+            Select::make('default_category_id')
+                ->label('دسته‌بندی پیش‌فرض')
+                ->options(fn () => Category::query()->where('is_active', true)->orderBy('name')->pluck('name','id'))
+                ->searchable()->nullable(),
+
+            Toggle::make('auto_categorize')
+                ->label('دسته‌بندی خودکار')
+                ->default(true),
+
+            Toggle::make('ignore_link_keyword')
+                ->label('کلمه کلیدی فقط از متن خبر')
+                ->default(true)
+                ->helperText('کلمه داخل URL یا لینک‌های صفحه هیچ‌وقت برای تطبیق Keyword استفاده نمی‌شود.'),
+
+            Toggle::make('is_active')->label('فعال')->default(true),
+
+            Actions::make([
+                Action::make('testSource')
+                    ->label('تست خواندن منبع')->icon('heroicon-o-beaker')->color('info')->button()
+                    ->action(function ($get) {
+                        $source = new Source([
+                            'name' => $get('name') ?: 'تست منبع',
+                            'type' => $get('type'),
+                            'url' => $get('url'),
+                            'identifier' => $get('identifier'),
+                            'settings' => [
+                                'feed_urls' => array_map(
+                                    fn ($v) => is_array($v) ? ($v['url'] ?? '') : $v,
+                                    $get('settings.feed_urls') ?? []
+                                ),
+                                'query' => $get('settings.query'),
+                                'count' => $get('settings.count') ?: 10,
+                            ],
+                            'auto_categorize' => (bool)$get('auto_categorize'),
+                            'ignore_link_keyword' => true,
+                        ]);
+
+                        try {
+                            $items = app(SourceReaderFactory::class)->make($source)->read($source);
+                            $preview = collect(array_slice($items, 0, 5))
+                                ->map(fn ($i, $n) => ($n+1).'. '.$i->title)
+                                ->implode("\n");
+                            Notification::make()->title('خواندن موفق بود')
+                                ->body("تعداد: ".count($items)."\n\n".$preview)
+                                ->success()->persistent()->send();
+                        } catch (Throwable $e) {
+                            Notification::make()->title('خطا در خواندن منبع')
+                                ->body($e->getMessage())->danger()->persistent()->send();
+                        }
+                    }),
+            ])->columnSpanFull(),
+        ]);
     }
 
     public static function table(Table $table): Table
     {
         return $table
             ->columns([
-
-                TextColumn::make('name')
-                    ->label('نام منبع')
-                    ->searchable()
-                    ->sortable(),
-
-                TextColumn::make('type')
-                    ->label('نوع منبع')
-                    ->badge()
-                    ->formatStateUsing(
-                        fn ($state) => match ($state) {
-                            'rss' => 'RSS',
-                            'eitaa' => 'ایتا',
-                            'html' => 'HTML',
-                            'javascript' => 'JavaScript',
-                            default => $state,
-                        }
-                    ),
-
-                TextColumn::make('url')
-                    ->label('آدرس')
-                    ->limit(40)
-                    ->toggleable(),
-
-                TextColumn::make('identifier')
-                    ->label('شناسه')
-                    ->placeholder('-'),
-
-                IconColumn::make('is_active')
-                    ->label('فعال')
-                    ->boolean(),
-
-                TextColumn::make('last_item_id')
-                    ->label('آخرین مطلب')
-                    ->placeholder('-')
-                    ->toggleable(),
-
-                TextColumn::make('last_read_at')
-                    ->label('آخرین بررسی')
-                    ->formatStateUsing(function ($state) {
-                        if (!$state) {
-                            return 'هنوز بررسی نشده';
-                        }
-
-                        return \Carbon\Carbon::parse($state)
-                            ->locale('fa')
-                            ->diffForHumans();
-                    })
-                    ->description(function ($state) {
-                        if (!$state) {
-                            return null;
-                        }
-
-                        return \Morilog\Jalali\Jalalian::fromCarbon(
-                            \Carbon\Carbon::parse($state)
-                        )->format('Y/m/d H:i');
-                    })
-                    ->sortable(),
-
+                TextColumn::make('name')->label('نام')->searchable()->sortable(),
+                TextColumn::make('parent.name')->label('والد')->placeholder('-')->badge(),
+                TextColumn::make('type')->label('نوع')->badge(),
+                TextColumn::make('defaultCategory.name')->label('دسته پیش‌فرض')->placeholder('-')->badge(),
+                IconColumn::make('auto_categorize')->label('خودکار')->boolean(),
+                IconColumn::make('is_active')->label('فعال')->boolean(),
+                TextColumn::make('last_read_at')->label('آخرین بررسی')
+                    ->jalaliDateTime('Y/m/d H:i')->sortable(),
             ])
-
-            ->defaultSort('id', 'desc')
-
-            ->filters([
-                //
-            ])
-
+            ->defaultSort('id','desc')
             ->recordActions([
-
-                Action::make('check')
-                    ->label('بررسی الآن')
-                    ->icon('heroicon-o-arrow-path')
-                    ->color('primary')
-                    ->requiresConfirmation()
-                    ->modalHeading('بررسی منبع')
-                    ->modalDescription(
-                        fn ($record) =>
-                        "آیا می‌خواهید «{$record->name}» همین الآن بررسی شود؟"
-                    )
-                    ->action(function ($record) {
-
-                        \App\Jobs\CheckSourceJob::dispatch(
-                            $record->id
-                        );
-
-                    })
-                    ->successNotificationTitle(
-                        'بررسی منبع در صف قرار گرفت'
-                    ),
-
-                \Filament\Actions\EditAction::make(),
-
-                \Filament\Actions\DeleteAction::make(),
-
+                Action::make('check')->label('بررسی الآن')->icon('heroicon-o-arrow-path')
+                    ->action(fn ($record) => \App\Jobs\CheckSourceJob::dispatch($record->id))
+                    ->successNotificationTitle('در صف بررسی قرار گرفت'),
+                EditAction::make(),
+                DeleteAction::make(),
             ])
-
             ->toolbarActions([
-
-                /*
-                 * بررسی همه منابع فعال
-                 */
-                \Filament\Actions\Action::make('checkAll')
-                    ->label('بررسی همه منابع')
-                    ->icon('heroicon-o-arrow-path')
-                    ->color('success')
+                Action::make('checkAll')->label('بررسی همه')->icon('heroicon-o-arrow-path')
                     ->requiresConfirmation()
-                    ->modalHeading('بررسی همه منابع')
-                    ->modalDescription(
-                        'همه منابع فعال در صف بررسی قرار خواهند گرفت. آیا ادامه می‌دهید؟'
-                    )
                     ->action(function () {
-
-                        $sources = \App\Models\Source::query()
-                            ->where('is_active', true)
-                            ->orderBy('id')
-                            ->get();
-
                         $count = 0;
-
-                        foreach ($sources as $source) {
-
-                            \App\Jobs\CheckSourceJob::dispatch(
-                                $source->id
-                            );
-
-                            $count++;
-                        }
-
-                        \Filament\Notifications\Notification::make()
-                            ->title('منابع در صف قرار گرفتند')
-                            ->body(
-                                "{$count} منبع برای بررسی در صف قرار گرفت."
-                            )
-                            ->success()
-                            ->send();
+                        Source::where('is_active',true)->each(function ($s) use (&$count) {
+                            \App\Jobs\CheckSourceJob::dispatch($s->id); $count++;
+                        });
+                        Notification::make()->title("{$count} منبع در صف قرار گرفت")->success()->send();
                     }),
-
-                \Filament\Actions\BulkActionGroup::make([
-                    \Filament\Actions\DeleteBulkAction::make(),
-                ]),
-
+                BulkActionGroup::make([DeleteBulkAction::make()]),
             ]);
     }
 
     public static function getPages(): array
     {
         return [
-
-            'index' =>
-                Pages\ListSources::route('/'),
-
-            'create' =>
-                Pages\CreateSource::route('/create'),
-
-            'edit' =>
-                Pages\EditSource::route('/{record}/edit'),
-
+            'index' => Pages\ListSources::route('/'),
+            'create' => Pages\CreateSource::route('/create'),
+            'edit' => Pages\EditSource::route('/{record}/edit'),
         ];
     }
 }

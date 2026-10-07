@@ -40,6 +40,8 @@ class RssReader implements SourceReaderInterface
      */
     protected int $articleTimeout = 15;
 
+    protected ?string $lastFeaturedImage = null;
+
     /**
      * اجرای Reader
      */
@@ -51,9 +53,22 @@ class RssReader implements SourceReaderInterface
             );
         }
 
-        $xml = $this->fetch($source->url);
+        $urls = $source->feedUrls();
+        if (empty($urls)) {
+            throw new RuntimeException(
+                "آدرس RSS برای منبع {$source->name} مشخص نشده است."
+            );
+        }
 
-        return $this->parse($xml);
+        $all = [];
+        foreach ($urls as $feedUrl) {
+            $xml = $this->fetch($feedUrl);
+            foreach ($this->parse($xml) as $item) {
+                $all[$item->externalId] = $item;
+            }
+        }
+
+        return array_values($all);
     }
 
     /**
@@ -176,6 +191,8 @@ class RssReader implements SourceReaderInterface
                     $item
                 );
 
+                $featuredImage = $this->extractRssImage($item);
+
                 $guid = trim(
                     (string) $item->guid
                 );
@@ -211,6 +228,8 @@ class RssReader implements SourceReaderInterface
                             $link,
                             $title
                         );
+
+                    $featuredImage ??= $this->lastFeaturedImage;
                 }
 
                 /*
@@ -295,6 +314,7 @@ class RssReader implements SourceReaderInterface
                         $pageContent !== null
                             ? 'article_page'
                             : 'rss',
+                    'featured_image_url' => $featuredImage,
                 ];
 
                 $result[] = new SourceItemData(
@@ -302,7 +322,8 @@ class RssReader implements SourceReaderInterface
                     title: $title,
                     url: $link ?: null,
                     content: $content ?: null,
-                    publishedAt: $publishedAt,
+                    publishedAt: $publishedAt?->setTimezone('Asia/Tehran'),
+                    featuredImageUrl: $featuredImage,
                     rawData: $rawData,
                 );
 
@@ -329,6 +350,45 @@ class RssReader implements SourceReaderInterface
         }
 
         return $result;
+    }
+
+    protected function extractRssImage(SimpleXMLElement $item): ?string
+    {
+        $namespaces = $item->getNameSpaces(true);
+
+        $candidates = [];
+
+        foreach (['media', 'itunes', 'content'] as $nsName) {
+            if (!isset($namespaces[$nsName])) continue;
+            try {
+                $children = $item->children($namespaces[$nsName]);
+                foreach ($children as $key => $node) {
+                    $key = strtolower((string)$key);
+                    if (in_array($key, ['content', 'thumbnail', 'image'], true)) {
+                        $attrs = $node->attributes();
+                        $url = trim((string)($attrs['url'] ?? $attrs['href'] ?? ''));
+                        if ($url) $candidates[] = $url;
+                    }
+                }
+            } catch (\Throwable) {}
+        }
+
+        if (isset($item->enclosure)) {
+            foreach ($item->enclosure as $enc) {
+                $attrs = $enc->attributes();
+                $type = strtolower((string)($attrs['type'] ?? ''));
+                $url = trim((string)($attrs['url'] ?? ''));
+                if ($url && (str_starts_with($type, 'image/') || preg_match('/\.(jpe?g|png|webp|gif)(\?|$)/i', $url))) {
+                    $candidates[] = $url;
+                }
+            }
+        }
+
+        foreach ($candidates as $url) {
+            if (filter_var($url, FILTER_VALIDATE_URL)) return $url;
+        }
+
+        return null;
     }
 
     /**
@@ -596,6 +656,8 @@ class RssReader implements SourceReaderInterface
                         $entry
                     );
 
+                $featuredImage = $this->extractRssImage($entry);
+
                 $id = trim(
                     (string) $entry->id
                 );
@@ -633,6 +695,8 @@ class RssReader implements SourceReaderInterface
                             $link,
                             $title
                         );
+
+                    $featuredImage ??= $this->lastFeaturedImage;
                 }
 
                 /*
@@ -708,6 +772,7 @@ class RssReader implements SourceReaderInterface
                                 $pageContent !== null
                                     ? 'article_page'
                                     : 'atom',
+                            'featured_image_url' => $featuredImage,
                         ],
                     );
 
@@ -868,6 +933,7 @@ class RssReader implements SourceReaderInterface
         string $title = ''
     ): ?string {
         try {
+            $this->lastFeaturedImage = null;
             $url = $this->normalizeUrl(
                 $url
             );
@@ -941,6 +1007,8 @@ class RssReader implements SourceReaderInterface
                 return null;
             }
 
+            $this->lastFeaturedImage = $this->extractFeaturedImageFromHtml($html, $url);
+
             /*
              * جلوگیری از پردازش HTML بسیار بزرگ
              */
@@ -995,6 +1063,41 @@ class RssReader implements SourceReaderInterface
 
             return null;
         }
+    }
+
+    protected function extractFeaturedImageFromHtml(string $html, string $baseUrl): ?string
+    {
+        if (trim($html) === '') return null;
+        libxml_use_internal_errors(true);
+        $dom = new DOMDocument();
+        $loaded = @$dom->loadHTML('<?xml encoding="UTF-8">'.$html, LIBXML_NOERROR|LIBXML_NOWARNING|LIBXML_NONET);
+        libxml_clear_errors();
+        if (!$loaded) return null;
+        $xpath = new DOMXPath($dom);
+
+        $queries = [
+            '//meta[translate(@property,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz")="og:image"]/@content',
+            '//meta[translate(@name,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz")="twitter:image"]/@content',
+            '//link[translate(@rel,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz")="image_src"]/@href',
+        ];
+        foreach ($queries as $query) {
+            $nodes = @$xpath->query($query);
+            if ($nodes !== false && $nodes->length) {
+                $url = trim((string)$nodes->item(0)->nodeValue);
+                if ($url) return $this->absoluteUrl($url, $baseUrl);
+            }
+        }
+        return null;
+    }
+
+    protected function absoluteUrl(string $url, string $baseUrl): string
+    {
+        if (preg_match('#^https?://#i', $url)) return $url;
+        if (str_starts_with($url, '//')) return 'https:' . $url;
+        $parsed = parse_url($baseUrl);
+        $root = ($parsed['scheme'] ?? 'https').'://'.($parsed['host'] ?? '');
+        if (str_starts_with($url, '/')) return $root.$url;
+        return rtrim($root.'/'.dirname($parsed['path'] ?? '/'), '/').'/'.ltrim($url,'/');
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Source;
+use App\Services\Monitoring\MonitoringErrorStore;
 use App\Services\Monitoring\MonitoringService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -14,63 +15,31 @@ use Throwable;
 
 class CheckSourceJob implements ShouldQueue, ShouldBeUnique
 {
-    use Dispatchable;
-    use InteractsWithQueue;
-    use Queueable;
-    use SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 2;
-
     public int $timeout = 45;
-
-    /**
-     * جلوگیری از ایجاد Job تکراری
-     * برای یک منبع
-     */
     public $uniqueFor = 3600;
 
-    public function __construct(
-        public int $sourceId
-    ) {
-    }
+    public function __construct(public int $sourceId) {}
 
-    public function uniqueId(): string
+    public function uniqueId(): string { return 'source-' . $this->sourceId; }
+
+    public function handle(MonitoringService $monitoringService): void
     {
-        return 'source-' . $this->sourceId;
+        $source = Source::find($this->sourceId);
+        if (!$source || !$source->is_active) return;
+        $monitoringService->monitor($source);
     }
 
-    public function handle(
-        MonitoringService $monitoringService
-    ): void {
-
-        $source = Source::find(
-            $this->sourceId
-        );
-
-        if (!$source || !$source->is_active) {
-            return;
+    public function failed(Throwable $exception): void
+    {
+        $source = Source::find($this->sourceId);
+        if ($source) {
+            app(MonitoringErrorStore::class)->record($source, $exception, null, [
+                'job_failed' => true,
+                'source_id' => $source->id,
+            ]);
         }
-
-        $stats = $monitoringService->monitor(
-            $source
-        );
-
-        logger()->info(
-            'بررسی منبع انجام شد',
-            $stats
-        );
-    }
-
-    public function failed(
-        Throwable $exception
-    ): void {
-
-        logger()->error(
-            'بررسی منبع شکست خورد',
-            [
-                'source_id' => $this->sourceId,
-                'error' => $exception->getMessage(),
-            ]
-        );
     }
 }
