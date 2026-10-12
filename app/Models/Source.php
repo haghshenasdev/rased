@@ -43,7 +43,10 @@ class Source extends Model
     public function profileImage(): ?string
     {
         if ($this->profile_image_url) return $this->profile_image_url;
-        if ($this->profile_image_path) return asset('storage/' . ltrim($this->profile_image_path, '/'));
+        if ($this->profile_image_path) {
+            $path = ltrim($this->profile_image_path, '/');
+            return asset(str_starts_with($path, 'source-profiles/') ? $path : 'storage/' . $path);
+        }
         return null;
     }
 }

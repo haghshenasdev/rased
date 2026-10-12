@@ -7,6 +7,7 @@ use App\Models\Source;
 use App\Models\SourceItem;
 use App\Services\Monitoring\Readers\SourceReaderFactory;
 use Throwable;
+use Illuminate\Support\Facades\Http;
 
 class MonitoringService
 {
@@ -34,17 +35,17 @@ class MonitoringService
 
             // پروفایل کانال ایتا را از خود صفحه ذخیره کن.
             if ($source->type === 'eitaa' && !empty($items[0]?->rawData['profile_image_url'])) {
-                $source->profile_image_url = $items[0]->rawData['profile_image_url'];
-                $source->save();
+                $this->storeSourceProfileImage($source, (string) $items[0]->rawData['profile_image_url']);
             }
             $lastExternalId = null;
 
             foreach ($items as $item) {
-                $lastExternalId = $item->externalId;
-
+                // GUIDهای RSS گاهی بسیار طولانی‌اند؛ کلید پایدار و محدود برای ایندکس DB بساز.
+                $externalId = $this->safeExternalId((string) $item->externalId);
+                $lastExternalId = $externalId;
                 $exists = SourceItem::query()
                     ->where('source_id', $source->id)
-                    ->where('external_id', $item->externalId)
+                    ->where('external_id', $externalId)
                     ->exists();
                 if ($exists) { $stats['duplicate']++; continue; }
 
@@ -65,7 +66,7 @@ class MonitoringService
 
                 $sourceItem = SourceItem::create([
                     'source_id' => $source->id,
-                    'external_id' => $item->externalId,
+                    'external_id' => $externalId,
                     'title' => $item->title,
                     'url' => $item->url,
                     'featured_image_url' => $item->featuredImageUrl ?: ($item->rawData['featured_image_url'] ?? null),
@@ -98,6 +99,51 @@ class MonitoringService
             ]);
             throw $e;
         }
+    }
+
+
+    /** ذخیره محلی تصویر پروفایل در public disk تا به دسترسی مستقیم میزبان تصویر وابسته نباشد. */
+    protected function storeSourceProfileImage(Source $source, string $url): void
+    {
+        if (!filter_var($url, FILTER_VALIDATE_URL) || !in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)) {
+            return;
+        }
+        try {
+            $response = Http::connectTimeout(4)->timeout(8)->withHeaders(['User-Agent' => 'RasedNewsMonitor/1.0', 'Accept' => 'image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8'])->get($url);
+            if (!$response->successful() || strlen($response->body()) > 3 * 1024 * 1024) {
+                $source->profile_image_url = $url;
+                $source->save();
+                return;
+            }
+            $mime = strtolower((string) $response->header('Content-Type'));
+            if (!str_starts_with($mime, 'image/')) {
+                $source->profile_image_url = $url;
+                $source->save();
+                return;
+            }
+            $extension = str_contains($mime, 'png') ? 'png' : (str_contains($mime, 'webp') ? 'webp' : (str_contains($mime, 'gif') ? 'gif' : 'jpg'));
+            $relativePath = 'source-profiles/' . $source->id . '.' . $extension;
+            $absoluteDirectory = public_path('source-profiles');
+            if (!is_dir($absoluteDirectory)) {
+                mkdir($absoluteDirectory, 0755, true);
+            }
+            file_put_contents(public_path($relativePath), $response->body());
+            $path = $relativePath;
+            $source->profile_image_path = $path;
+            $source->profile_image_url = null;
+            $source->save();
+        } catch (Throwable $e) {
+            // نگه داشتن URL خارجی به عنوان fallback؛ شکست تصویر نباید کل اسکن را متوقف کند.
+            $source->profile_image_url = $url;
+            $source->save();
+        }
+    }
+
+    protected function safeExternalId(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') return hash('sha256', 'empty');
+        return mb_strlen($value) <= 180 ? $value : 'sha256:' . hash('sha256', $value);
     }
 
     public function monitorAll(): array

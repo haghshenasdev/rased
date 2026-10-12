@@ -77,7 +77,7 @@ Route::get('/cron/queue/{token}', function (string $token) {
     ]);
 });
 
-Route::get('/monitoring/run', function () {
+Route::middleware('auth')->get('/monitoring/run', function () {
 
     $sources = Source::query()
         ->where('is_active', true)

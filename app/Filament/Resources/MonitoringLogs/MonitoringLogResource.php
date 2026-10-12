@@ -41,8 +41,8 @@ class MonitoringLogResource extends Resource
                 TextColumn::make('status')->label('وضعیت')->badge()
                     ->color(fn ($state) => $state === 'failed' ? 'danger' : 'success'),
                 TextColumn::make('error_type')->label('نوع')->searchable()->toggleable(),
-                TextColumn::make('message')->label('پیام')->limit(100)->wrap()->tooltip(fn ($record) => $record->message),
-                TextColumn::make('context.title')->label('خبر')->limit(60)->toggleable(),
+                TextColumn::make('message')->label('پیام')->limit(100)->wrap()->tooltip(fn ($record) => $record->message)->copyable()->copyMessage('متن پیام کپی شد')->copyMessageDuration(1500),
+                TextColumn::make('context.title')->label('خبر')->limit(60)->wrap()->tooltip(fn ($record) => data_get($record->context, 'title'))->copyable()->copyMessage('عنوان خبر کپی شد')->toggleable(),
             ])
             ->filters([
                 SelectFilter::make('source_id')->label('منبع')->relationship('source', 'name')->searchable(),

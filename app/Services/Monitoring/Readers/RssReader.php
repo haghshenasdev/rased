@@ -33,12 +33,12 @@ class RssReader implements SourceReaderInterface
     /**
      * Timeout دریافت RSS.
      */
-    protected int $rssTimeout = 20;
+    protected int $rssTimeout = 18;
 
     /**
      * Timeout دریافت صفحه خبر.
      */
-    protected int $articleTimeout = 15;
+    protected int $articleTimeout = 8;
 
     protected ?string $lastFeaturedImage = null;
 
@@ -76,15 +76,14 @@ class RssReader implements SourceReaderInterface
      */
     protected function fetch(string $url): string
     {
-        $response = Http::connectTimeout(10)
+        $response = Http::connectTimeout(5)
             ->timeout($this->rssTimeout)
-            ->withoutVerifying()
-            ->retry(3, 1000)
+            ->retry(2, 1200, function ($exception, $request) {
+                $status = method_exists($exception, 'response') ? $exception->response?->status() : null;
+                return $status === null || in_array($status, [408, 425, 429, 500, 502, 503, 504], true);
+            })
             ->withHeaders([
-                'User-Agent' =>
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' .
-                    'AppleWebKit/537.36 (KHTML, like Gecko) ' .
-                    'Chrome/139.0.0.0 Safari/537.36',
+                'User-Agent' => 'RasedNewsMonitor/1.0 (+RSS reader; contact site administrator)',
 
                 'Accept' =>
                     'application/rss+xml, application/atom+xml, ' .
@@ -94,8 +93,6 @@ class RssReader implements SourceReaderInterface
                 'Accept-Language' =>
                     'fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7',
 
-                'Cache-Control' => 'no-cache',
-                'Pragma' => 'no-cache',
             ])
             ->get($url);
 
@@ -950,24 +947,20 @@ class RssReader implements SourceReaderInterface
                 ]
             );
 
-            $response = Http::connectTimeout(8)
+            // درخواست‌ها را آهسته‌تر می‌کنیم تا از فشار غیرضروری روی سایت ناشر جلوگیری شود.
+            usleep(350000);
+            $response = Http::connectTimeout(4)
                 ->timeout($this->articleTimeout)
-                ->withoutVerifying()
                 ->retry(
-                    2,
-                    800,
-                    function (
-                        $exception,
-                        $request
-                    ) {
-                        return true;
+                    1,
+                    1500,
+                    function ($exception, $request) {
+                        $status = method_exists($exception, 'response') ? $exception->response?->status() : null;
+                        return $status === null || in_array($status, [408, 425, 429, 500, 502, 503, 504], true);
                     }
                 )
                 ->withHeaders([
-                    'User-Agent' =>
-                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' .
-                        'AppleWebKit/537.36 (KHTML, like Gecko) ' .
-                        'Chrome/139.0.0.0 Safari/537.36',
+                    'User-Agent' => 'RasedNewsMonitor/1.0 (+RSS reader; contact site administrator)',
 
                     'Accept' =>
                         'text/html,application/xhtml+xml,' .
@@ -977,11 +970,6 @@ class RssReader implements SourceReaderInterface
                     'Accept-Language' =>
                         'fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7',
 
-                    'Cache-Control' =>
-                        'no-cache',
-
-                    'Pragma' =>
-                        'no-cache',
                 ])
                 ->get($url);
 
