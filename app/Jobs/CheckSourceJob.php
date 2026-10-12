@@ -18,7 +18,8 @@ class CheckSourceJob implements ShouldQueue, ShouldBeUnique
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 2;
-    public int $timeout = 45;
+    public int $timeout = 90;
+    public array $backoff = [30, 90];
     public $uniqueFor = 3600;
 
     public function __construct(public int $sourceId) {}

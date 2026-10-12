@@ -67,6 +67,7 @@ Route::get('/cron/queue/{token}', function (string $token) {
         'connection' => 'database',
         '--stop-when-empty' => true,
         '--max-time' => 50,
+        '--timeout' => 90,
         '--tries' => 2,
     ]);
 
