@@ -12,13 +12,13 @@ use Symfony\Component\DomCrawler\Crawler;
 use Throwable;
 
 /**
- * خواندن اخبار فارس از نقشه سایت و استخراج فقط عنوان و توضیحات HTML.
- * متن بدنه خبر عمداً دریافت یا ذخیره نمی‌شود.
+ * خواندن اخبار فارس از نقشه‌های سایت روزانه.
+ * فقط عنوان و توضیحات متادیتای صفحه ذخیره می‌شود؛ متن کامل خبر استخراج نمی‌شود.
  */
 class FarsNewsSitemapReader implements SourceReaderInterface
 {
-    private const DEFAULT_SITEMAP = 'https://farsnews.ir/sitemaps/contents/index';
-    private const USER_AGENT = 'RasedNewsMonitor/1.0 (+https://rased.hajideligani.ir)';
+    private const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+    private const SITEMAP_BASE = 'https://farsnews.ir/sitemaps/contents';
 
     public function read(Source $source): array
     {
@@ -28,127 +28,110 @@ class FarsNewsSitemapReader implements SourceReaderInterface
         $today = now('Asia/Tehran')->startOfDay();
         $fromDate = $today->copy()->subDays($lookbackDays - 1);
 
+        // آدرس نقشه روزانه را مستقیماً از تاریخ می‌سازیم و سراغ index سالانه نمی‌رویم.
         $dailySitemaps = [];
-        for ($year = (int) $fromDate->format('Y'); $year <= (int) $today->format('Y'); $year++) {
-            $yearUrl = $this->yearIndexUrl((string) ($source->url ?: self::DEFAULT_SITEMAP . $today->format('Y') . '.xml'), $year);
-            try {
-                $yearEntries = $this->readYearIndex($yearUrl);
-            } catch (Throwable $e) {
-                // در صورت اختلال نقشه سالانه، نقشه‌های روزانه که پایین‌تر اضافه می‌شوند همچنان بررسی می‌شوند.
-                report($e);
-                $yearEntries = [];
-            }
-            foreach ($yearEntries as $entry) {
-                if (!$entry['url']) {
-                    continue;
-                }
-                if (preg_match('~/contents/(\d{4})/(\d{2})/(\d{2})/~', $entry['url'], $m)) {
-                    try {
-                        $date = Carbon::createFromDate((int) $m[1], (int) $m[2], (int) $m[3], 'Asia/Tehran')->startOfDay();
-                    } catch (Throwable) {
-                        continue;
-                    }
-                    if ($date->betweenIncluded($fromDate, $today)) {
-                        $dailySitemaps[$entry['url']] = $date->timestamp;
-                    }
-                }
-            }
+        for ($date = $today->copy(); $date->gte($fromDate); $date->subDay()) {
+            $dailySitemaps[] = $this->dailySitemapUrl($date);
         }
 
-        // به نقشه سالانه به‌تنهایی تکیه نمی‌کنیم؛ نقشه روزانه هر روز بازه را هم
-        // مستقیم بررسی می‌کنیم. بعضی وقت‌ها index سالانه دیر به‌روز می‌شود.
-        for ($date = $fromDate->copy(); $date->lte($today); $date->addDay()) {
-            $dailyUrl = $this->dailySitemapUrl($date);
-            $dailySitemaps[$dailyUrl] = $date->timestamp;
-        }
-        arsort($dailySitemaps, SORT_NUMERIC);
-
-        $articleUrls = [];
-        foreach (array_keys($dailySitemaps) as $dailyUrl) {
+        $articleEntries = [];
+        $sitemapErrors = [];
+        foreach ($dailySitemaps as $dailyUrl) {
             try {
-                foreach ($this->readUrlSet($dailyUrl) as $url) {
+                foreach ($this->readUrlSet($dailyUrl) as $entry) {
+                    $url = $entry['url'];
                     if (!$this->isFarsArticleUrl($url)) {
                         continue;
                     }
-                    $articleUrls[$url] = true;
-                    if (count($articleUrls) >= $maxItems) {
-                        break 2;
+
+                    // اگر یک URL در چند نقشه دیده شد، رکورد دارای lastmod جدیدتر نگه داشته شود.
+                    if (!isset($articleEntries[$url])) {
+                        $articleEntries[$url] = $entry;
+                    } elseif ($entry['lastmod'] && (!$articleEntries[$url]['lastmod'] || $entry['lastmod'] > $articleEntries[$url]['lastmod'])) {
+                        $articleEntries[$url] = $entry;
                     }
                 }
             } catch (Throwable $e) {
-                // یک نقشه روزانه خراب نباید مانع بررسی روزهای دیگر شود.
+                $sitemapErrors[] = $e->getMessage();
                 report($e);
             }
         }
 
-        if (!$articleUrls) {
+        if (!$articleEntries) {
+            $detail = $sitemapErrors ? ' جزئیات: ' . $sitemapErrors[0] : '';
             throw new RuntimeException(
-                'نقشه سایت دریافت شد، اما هیچ آدرس خبری در بازه ' . $lookbackDays .
-                ' روزه پیدا نشد. مقدار بازه را افزایش دهید یا دسترسی هاست به نقشه‌های روزانه فارس را بررسی کنید.'
+                'در نقشه‌های سایت روزانه فارس طی ' . $lookbackDays . ' روز گذشته آدرس خبری پیدا نشد.' . $detail .
+                ' آدرس نقشه روزانه باید از الگوی YYYY/MM/DD/index001.xml پیروی کند.'
             );
         }
 
+        // جدیدترین خبرها بر اساس lastmod در ابتدای فهرست قرار می‌گیرند.
+        uasort($articleEntries, static function (array $a, array $b): int {
+            $aTime = $a['lastmod'] ? strtotime($a['lastmod']) : 0;
+            $bTime = $b['lastmod'] ? strtotime($b['lastmod']) : 0;
+            return $bTime <=> $aTime;
+        });
+        $articleEntries = array_slice($articleEntries, 0, $maxItems, true);
+
         $results = [];
         $metadataFailures = 0;
-        foreach (array_keys($articleUrls) as $url) {
+        $metadataErrors = [];
+        foreach ($articleEntries as $url => $entry) {
             try {
                 $meta = $this->articleMetadata($url);
                 if (!$meta || $meta['title'] === '') {
                     $metadataFailures++;
+                    $metadataErrors[] = 'عنوان از HTML قابل استخراج نبود: ' . $url;
                     continue;
                 }
 
+                $publishedAt = $this->parseDate($meta['published_at'] ?: $entry['lastmod']);
                 $results[] = new SourceItemData(
                     externalId: sha1($url),
                     title: $meta['title'],
                     url: $url,
                     content: $meta['description'] !== '' ? $meta['description'] : null,
-                    publishedAt: $this->parseDate($meta['published_at']),
+                    publishedAt: $publishedAt,
                     featuredImageUrl: $meta['image'] ?: null,
                     rawData: [
                         'source' => 'farsnews_sitemap',
                         'description' => $meta['description'],
+                        'sitemap_lastmod' => $entry['lastmod'],
                         'metadata_only' => true,
                     ],
                 );
             } catch (Throwable $e) {
-                // یک خبر خراب نباید کل اسکن منبع را متوقف کند.
                 $metadataFailures++;
+                $metadataErrors[] = $e->getMessage();
                 report($e);
             }
         }
 
         if (!$results) {
+            $detail = $metadataErrors ? ' اولین خطا: ' . $metadataErrors[0] : '';
             throw new RuntimeException(
-                'از نقشه سایت ' . count($articleUrls) . ' آدرس خبر پیدا شد، اما عنوان هیچ‌کدام قابل استخراج نبود.' .
-                ' تعداد پاسخ‌های ناموفق/بدون عنوان: ' . $metadataFailures .
-                '. احتمال دارد هاست هنگام دریافت صفحات خبر با محدودیت یا خطای HTTP روبه‌رو شده باشد.'
+                'از نقشه سایت ' . count($articleEntries) . ' آدرس خبر پیدا شد، اما عنوان هیچ‌کدام قابل استخراج نبود.' .
+                ' تعداد پاسخ‌های ناموفق/بدون عنوان: ' . $metadataFailures . '.' . $detail .
+                ' اگر خطا HTTP 403 یا 429 است، احتمالاً دسترسی هاست به صفحه خبر محدود شده است.'
             );
         }
 
         return $results;
     }
 
-    private function yearIndexUrl(string $configuredUrl, int $year): string
-    {
-        if (preg_match('~/index\d{4}\.xml(?:\?.*)?$~', $configuredUrl)) {
-            return preg_replace('~/index\d{4}\.xml~', '/index' . $year . '.xml', $configuredUrl) ?: $configuredUrl;
-        }
-        return self::DEFAULT_SITEMAP . $year . '.xml';
-    }
-
     private function dailySitemapUrl(Carbon $date): string
     {
-        return sprintf('https://farsnews.ir/sitemaps/contents/%s/%s/%s/index001.xml', $date->format('Y'), $date->format('m'), $date->format('d'));
+        return sprintf('%s/%s/%s/%s/index001.xml', self::SITEMAP_BASE, $date->format('Y'), $date->format('m'), $date->format('d'));
     }
 
     /** @return array<int, array{url:string,lastmod:?string}> */
-    private function readYearIndex(string $url): array
+    private function readUrlSet(string $url): array
     {
-        $key = 'rased:farsnews:sitemap-index:' . sha1($url);
-        $entries = Cache::remember($key, now()->addMinutes(30), function () use ($url) {
+        // نسخه v2 مانع استفاده از کش قدیمیِ قالب قبلی می‌شود.
+        $key = 'rased:farsnews:urlset:v2:' . sha1($url);
+        $entries = Cache::remember($key, now()->addMinutes(10), function () use ($url) {
             $xml = $this->fetchXml($url);
-            $nodes = $xml->xpath('//*[local-name()="sitemap"]');
+            $nodes = $xml->xpath('//*[local-name()="url"]');
             $entries = [];
             foreach ($nodes ?: [] as $node) {
                 $locNodes = $node->xpath('./*[local-name()="loc"]');
@@ -161,42 +144,22 @@ class FarsNewsSitemapReader implements SourceReaderInterface
             }
             return $entries;
         });
+
         if (!$entries) {
             Cache::forget($key);
         }
         return $entries;
     }
 
-    /** @return array<int, string> */
-    private function readUrlSet(string $url): array
-    {
-        $key = 'rased:farsnews:urlset:' . sha1($url);
-        $urls = Cache::remember($key, now()->addMinutes(20), function () use ($url) {
-            $xml = $this->fetchXml($url);
-            $nodes = $xml->xpath('//*[local-name()="url"]/*[local-name()="loc"]');
-            $urls = [];
-            foreach ($nodes ?: [] as $node) {
-                $loc = trim((string) $node);
-                if ($loc !== '') {
-                    $urls[] = $loc;
-                }
-            }
-            return array_values(array_unique($urls));
-        });
-        if (!$urls) {
-            Cache::forget($key);
-        }
-        return $urls;
-    }
-
     private function fetchXml(string $url): \SimpleXMLElement
     {
         $response = Http::connectTimeout(8)
-            ->timeout(20)
+            ->timeout(25)
             ->withHeaders([
                 'User-Agent' => self::USER_AGENT,
                 'Accept' => 'application/xml,text/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language' => 'fa-IR,fa;q=0.9,en;q=0.6',
+                'Accept-Language' => 'fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer' => 'https://farsnews.ir/',
             ])
             ->get($url);
 
@@ -229,37 +192,43 @@ class FarsNewsSitemapReader implements SourceReaderInterface
             return false;
         }
         $path = trim((string) ($parts['path'] ?? ''), '/');
-        return $path !== '' && !str_starts_with($path, 'sitemaps/') && !str_starts_with($path, 'search/');
+        return $path !== ''
+            && !str_starts_with($path, 'sitemaps/')
+            && !str_starts_with($path, 'search/');
     }
 
     /** @return array{title:string,description:string,published_at:?string,image:?string}|null */
     private function articleMetadata(string $url): ?array
     {
-        $cacheKey = 'rased:farsnews:metadata:' . sha1($url);
+        $cacheKey = 'rased:farsnews:metadata:v2:' . sha1($url);
         $meta = Cache::remember($cacheKey, now()->addHours(6), function () use ($url) {
             $response = Http::connectTimeout(8)
-                ->timeout(20)
+                ->timeout(25)
                 ->withHeaders([
                     'User-Agent' => self::USER_AGENT,
-                    'Accept' => 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language' => 'fa-IR,fa;q=0.9,en;q=0.6',
+                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Accept-Language' => 'fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'Referer' => 'https://farsnews.ir/',
+                    'Upgrade-Insecure-Requests' => '1',
                 ])
                 ->get($url);
 
             if (!$response->successful()) {
-                return null;
+                throw new RuntimeException('دریافت صفحه خبر ناموفق بود؛ HTTP ' . $response->status() . ' (' . $url . ')');
             }
 
             $html = $response->body();
             if ($html === '' || strlen($html) > 5 * 1024 * 1024) {
-                return null;
+                throw new RuntimeException('پاسخ HTML خبر خالی یا بیش از حد بزرگ است (' . $url . ')');
             }
 
             $crawler = new Crawler($html, $url);
             $title = $this->metaValue($crawler, [
                 'meta[property="og:title"]',
                 'meta[name="twitter:title"]',
+                'meta[name="title"]',
                 'title',
+                'h1',
             ]);
             $description = $this->metaValue($crawler, [
                 'meta[name="description"]',
@@ -270,18 +239,32 @@ class FarsNewsSitemapReader implements SourceReaderInterface
                 'meta[property="article:published_time"]',
                 'meta[name="datePublished"]',
                 'meta[property="article:modified_time"]',
+                'time[datetime]',
             ]);
             $image = $this->metaValue($crawler, [
                 'meta[property="og:image"]',
                 'meta[name="twitter:image"]',
             ]);
 
-            // عنوان فارس گاهی با پیشوند «fars |» منتشر می‌شود؛ پیشوند برند را حذف می‌کنیم.
             $title = preg_replace('/^\s*fars\s*\|\s*/iu', '', $title) ?? $title;
             $cleanTitle = $this->cleanText($title);
             if ($cleanTitle === '') {
-                return null;
+                // برای خطای قابل تشخیص، نوع پاسخ را گزارش می‌کنیم نه محتوای صفحه را.
+                $contentType = (string) $response->header('Content-Type', 'نامشخص');
+                throw new RuntimeException('پاسخ صفحه خبر HTTP 200 داشت، اما عنوان در HTML پیدا نشد؛ Content-Type=' . $contentType . ' (' . $url . ')');
             }
+
+            if ($publishedAt === '') {
+                try {
+                    $timeNode = $crawler->filter('time[datetime]');
+                    if ($timeNode->count()) {
+                        $publishedAt = (string) $timeNode->first()->attr('datetime');
+                    }
+                } catch (Throwable) {
+                    // تاریخ اختیاری است.
+                }
+            }
+
             return [
                 'title' => $cleanTitle,
                 'description' => $this->cleanText($description),
@@ -289,6 +272,7 @@ class FarsNewsSitemapReader implements SourceReaderInterface
                 'image' => $image !== '' ? $this->absoluteUrl($image, $url) : null,
             ];
         });
+
         if (!$meta) {
             Cache::forget($cacheKey);
         }
@@ -304,13 +288,19 @@ class FarsNewsSitemapReader implements SourceReaderInterface
                     continue;
                 }
                 $node = $nodes->first();
-                $value = $selector === 'title' ? $node->text('', true) : (string) $node->attr('content');
+                if (str_starts_with($selector, 'meta[')) {
+                    $value = (string) $node->attr('content');
+                } elseif (str_starts_with($selector, 'time[')) {
+                    $value = (string) $node->attr('datetime');
+                } else {
+                    $value = $node->text('', true);
+                }
                 $value = trim(html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
                 if ($value !== '') {
                     return $value;
                 }
             } catch (Throwable) {
-                // ادامه با selector جایگزین
+                // در صورت نبودن selector، گزینه بعدی بررسی شود.
             }
         }
         return '';
