@@ -179,6 +179,14 @@ class SourceResource extends Resource
                 TextColumn::make('name')->label('نام')->searchable()->sortable(),
                 TextColumn::make('parent.name')->label('والد')->placeholder('-')->badge(),
                 TextColumn::make('type')->label('نوع')->badge(),
+                TextColumn::make('last_item_url')
+                    ->label('آخرین خبر بررسی‌شده')
+                    ->url(fn ($record) => $record->last_item_url ?: null)
+                    ->openUrlInNewTab()
+                    ->limit(48)
+                    ->placeholder('هنوز خبری بررسی نشده')
+                    ->color('primary')
+                    ->copyable(),
                 TextColumn::make('defaultCategory.name')->label('دسته پیش‌فرض')->placeholder('-')->badge(),
                 IconColumn::make('auto_categorize')->label('خودکار')->boolean(),
                 IconColumn::make('is_active')->label('فعال')->boolean(),

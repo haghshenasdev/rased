@@ -38,11 +38,16 @@ class MonitoringService
                 $this->storeSourceProfileImage($source, (string) $items[0]->rawData['profile_image_url']);
             }
             $lastExternalId = null;
+            $lastItemUrl = null;
 
             foreach ($items as $item) {
                 // GUIDهای RSS گاهی بسیار طولانی‌اند؛ کلید پایدار و محدود برای ایندکس DB بساز.
                 $externalId = $this->safeExternalId((string) $item->externalId);
                 $lastExternalId = $externalId;
+
+                // لینک آخرین آیتمی که در این نوبت خوانده می‌شود را مستقل از کلمه کلیدی نگه دار.
+                // بنابراین خبر تکراری، بلک‌لیست‌شده یا بدون کلمه کلیدی هم لینک خود را ثبت می‌کند.
+                $lastItemUrl = !empty($item->url) ? (string) $item->url : $lastItemUrl;
                 $exists = SourceItem::query()
                     ->where('source_id', $source->id)
                     ->where('external_id', $externalId)
@@ -87,6 +92,7 @@ class MonitoringService
             }
 
             $source->last_item_id = $lastExternalId ?? $source->last_item_id;
+            $source->last_item_url = $lastItemUrl ?? $source->last_item_url;
             $source->last_read_at = now('Asia/Tehran');
             $source->save();
 
