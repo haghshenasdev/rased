@@ -8,7 +8,6 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
-use Symfony\Component\DomCrawler\Crawler;
 use Throwable;
 
 /**
@@ -222,29 +221,12 @@ class FarsNewsSitemapReader implements SourceReaderInterface
                 throw new RuntimeException('پاسخ HTML خبر خالی یا بیش از حد بزرگ است (' . $url . ')');
             }
 
-            $crawler = new Crawler($html, $url);
-            $title = $this->metaValue($crawler, [
-                'meta[property="og:title"]',
-                'meta[name="twitter:title"]',
-                'meta[name="title"]',
-                'title',
-                'h1',
-            ]);
-            $description = $this->metaValue($crawler, [
-                'meta[name="description"]',
-                'meta[property="og:description"]',
-                'meta[name="twitter:description"]',
-            ]);
-            $publishedAt = $this->metaValue($crawler, [
-                'meta[property="article:published_time"]',
-                'meta[name="datePublished"]',
-                'meta[property="article:modified_time"]',
-                'time[datetime]',
-            ]);
-            $image = $this->metaValue($crawler, [
-                'meta[property="og:image"]',
-                'meta[name="twitter:image"]',
-            ]);
+            // استخراج متادیتا با PHP خالص؛ نیازی به Symfony DomCrawler نیست.
+            $metadata = $this->extractHtmlMetadata($html);
+            $title = $metadata['title'];
+            $description = $metadata['description'];
+            $publishedAt = $metadata['published_at'];
+            $image = $metadata['image'];
 
             $title = preg_replace('/^\s*fars\s*\|\s*/iu', '', $title) ?? $title;
             $cleanTitle = $this->cleanText($title);
@@ -252,17 +234,6 @@ class FarsNewsSitemapReader implements SourceReaderInterface
                 // برای خطای قابل تشخیص، نوع پاسخ را گزارش می‌کنیم نه محتوای صفحه را.
                 $contentType = (string) $response->header('Content-Type', 'نامشخص');
                 throw new RuntimeException('پاسخ صفحه خبر HTTP 200 داشت، اما عنوان در HTML پیدا نشد؛ Content-Type=' . $contentType . ' (' . $url . ')');
-            }
-
-            if ($publishedAt === '') {
-                try {
-                    $timeNode = $crawler->filter('time[datetime]');
-                    if ($timeNode->count()) {
-                        $publishedAt = (string) $timeNode->first()->attr('datetime');
-                    }
-                } catch (Throwable) {
-                    // تاریخ اختیاری است.
-                }
             }
 
             return [
@@ -279,31 +250,93 @@ class FarsNewsSitemapReader implements SourceReaderInterface
         return $meta;
     }
 
-    private function metaValue(Crawler $crawler, array $selectors): string
+    /**
+     * استخراج عنوان، توضیحات، تاریخ و تصویر بدون وابستگی خارجی.
+     * فقط متادیتای HTML خوانده می‌شود و متن کامل خبر استخراج نمی‌شود.
+     *
+     * @return array{title:string,description:string,published_at:string,image:string}
+     */
+    private function extractHtmlMetadata(string $html): array
     {
-        foreach ($selectors as $selector) {
-            try {
-                $nodes = $crawler->filter($selector);
-                if (!$nodes->count()) {
-                    continue;
+        $meta = [];
+
+        if (preg_match_all('~<meta\b[^>]*>~is', $html, $matches)) {
+            foreach ($matches[0] as $tag) {
+                $attributes = $this->parseHtmlAttributes($tag);
+                $key = strtolower(trim(
+                    $attributes['property']
+                    ?? $attributes['name']
+                    ?? ''
+                ));
+                $value = trim((string) ($attributes['content'] ?? ''));
+
+                if ($key !== '' && $value !== '' && !isset($meta[$key])) {
+                    $meta[$key] = $value;
                 }
-                $node = $nodes->first();
-                if (str_starts_with($selector, 'meta[')) {
-                    $value = (string) $node->attr('content');
-                } elseif (str_starts_with($selector, 'time[')) {
-                    $value = (string) $node->attr('datetime');
-                } else {
-                    $value = $node->text('', true);
-                }
-                $value = trim(html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-                if ($value !== '') {
-                    return $value;
-                }
-            } catch (Throwable) {
-                // در صورت نبودن selector، گزینه بعدی بررسی شود.
             }
         }
-        return '';
+
+        $title = $meta['og:title']
+            ?? $meta['twitter:title']
+            ?? $meta['title']
+            ?? '';
+
+        if ($title === '' && preg_match('~<title\b[^>]*>(.*?)</title\s*>~is', $html, $match)) {
+            $title = $match[1];
+        }
+
+        if ($title === '' && preg_match('~<h1\b[^>]*>(.*?)</h1\s*>~is', $html, $match)) {
+            $title = $match[1];
+        }
+
+        $description = $meta['description']
+            ?? $meta['og:description']
+            ?? $meta['twitter:description']
+            ?? '';
+
+        $publishedAt = $meta['article:published_time']
+            ?? $meta['datepublished']
+            ?? $meta['article:modified_time']
+            ?? '';
+
+        if ($publishedAt === '' && preg_match('~<time\b[^>]*>~is', $html, $match)) {
+            $timeAttributes = $this->parseHtmlAttributes($match[0]);
+            $publishedAt = (string) ($timeAttributes['datetime'] ?? '');
+        }
+
+        $image = $meta['og:image']
+            ?? $meta['twitter:image']
+            ?? '';
+
+        return [
+            'title' => $this->cleanText($title),
+            'description' => $this->cleanText($description),
+            'published_at' => trim($publishedAt),
+            'image' => trim($image),
+        ];
+    }
+
+    /** @return array<string,string> */
+    private function parseHtmlAttributes(string $tag): array
+    {
+        $attributes = [];
+        $pattern = '~([a-zA-Z_:][a-zA-Z0-9_:.-]*)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))~s';
+
+        if (preg_match_all($pattern, $tag, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $match) {
+                $name = strtolower($match[1]);
+                $value = $match[2] !== '' ? $match[2]
+                    : (($match[3] ?? '') !== '' ? $match[3] : ($match[4] ?? ''));
+
+                $attributes[$name] = html_entity_decode(
+                    $value,
+                    ENT_QUOTES | ENT_HTML5,
+                    'UTF-8'
+                );
+            }
+        }
+
+        return $attributes;
     }
 
     private function cleanText(string $text): string
