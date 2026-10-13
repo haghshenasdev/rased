@@ -23,58 +23,70 @@ class FarsNewsSitemapReader implements SourceReaderInterface
     {
         $settings = is_array($source->settings) ? $source->settings : [];
         $maxItems = min(300, max(1, (int) ($settings['max_items'] ?? 100)));
-        $lookbackDays = min(14, max(1, (int) ($settings['lookback_days'] ?? 2)));
+
+        // فقط نقشه XML امروز خوانده می‌شود؛ ترتیب خود XML (جدید به قدیم) حفظ می‌شود.
         $today = now('Asia/Tehran')->startOfDay();
-        $fromDate = $today->copy()->subDays($lookbackDays - 1);
+        $todaySitemap = $this->dailySitemapUrl($today);
 
-        // آدرس نقشه روزانه را مستقیماً از تاریخ می‌سازیم و سراغ index سالانه نمی‌رویم.
-        $dailySitemaps = [];
-        for ($date = $today->copy(); $date->gte($fromDate); $date->subDay()) {
-            $dailySitemaps[] = $this->dailySitemapUrl($date);
-        }
-
-        $articleEntries = [];
-        $sitemapErrors = [];
-        foreach ($dailySitemaps as $dailyUrl) {
-            try {
-                foreach ($this->readUrlSet($dailyUrl) as $entry) {
-                    $url = $entry['url'];
-                    if (!$this->isFarsArticleUrl($url)) {
-                        continue;
-                    }
-
-                    // اگر یک URL در چند نقشه دیده شد، رکورد دارای lastmod جدیدتر نگه داشته شود.
-                    if (!isset($articleEntries[$url])) {
-                        $articleEntries[$url] = $entry;
-                    } elseif ($entry['lastmod'] && (!$articleEntries[$url]['lastmod'] || $entry['lastmod'] > $articleEntries[$url]['lastmod'])) {
-                        $articleEntries[$url] = $entry;
-                    }
+        $orderedEntries = [];
+        try {
+            foreach ($this->readUrlSet($todaySitemap) as $entry) {
+                $url = trim($entry['url']);
+                if (!$this->isFarsArticleUrl($url) || isset($orderedEntries[$url])) {
+                    continue;
                 }
-            } catch (Throwable $e) {
-                $sitemapErrors[] = $e->getMessage();
-                report($e);
-            }
-        }
 
-        if (!$articleEntries) {
-            $detail = $sitemapErrors ? ' جزئیات: ' . $sitemapErrors[0] : '';
+                // ترتیب اصلی فایل XML حفظ می‌شود و هیچ مرتب‌سازی مجددی نداریم.
+                $orderedEntries[$url] = [
+                    'url' => $url,
+                    'lastmod' => $entry['lastmod'],
+                ];
+            }
+        } catch (Throwable $e) {
             throw new RuntimeException(
-                'در نقشه‌های سایت روزانه فارس طی ' . $lookbackDays . ' روز گذشته آدرس خبری پیدا نشد.' . $detail .
-                ' آدرس نقشه روزانه باید از الگوی YYYY/MM/DD/index001.xml پیروی کند.'
+                'دریافت نقشه سایت امروز فارس ناموفق بود. ' . $e->getMessage(),
+                previous: $e,
             );
         }
 
-        // جدیدترین خبرها بر اساس lastmod در ابتدای فهرست قرار می‌گیرند.
-        uasort($articleEntries, static function (array $a, array $b): int {
-            $aTime = $a['lastmod'] ? strtotime($a['lastmod']) : 0;
-            $bTime = $b['lastmod'] ? strtotime($b['lastmod']) : 0;
-            return $bTime <=> $aTime;
-        });
-        $articleEntries = array_slice($articleEntries, 0, $maxItems, true);
+        if (!$orderedEntries) {
+            throw new RuntimeException(
+                'در نقشه سایت امروز فارس آدرس خبری پیدا نشد. آدرس نقشه روزانه باید از الگوی YYYY/MM/DD/index001.xml پیروی کند.'
+            );
+        }
+
+        // نسخه قبلی را یک بار بدون اتکا به نشانگر قدیمی اجرا می‌کنیم؛
+        // نسخه قبلی نشانگر را روی قدیمی‌ترین خبرِ دسته ذخیره می‌کرد.
+        $cursorMode = (string) ($settings['farsnews_sitemap_cursor_mode'] ?? '');
+        $lastReadUrl = $cursorMode === 'newest_first_v1'
+            ? trim((string) $source->last_item_url)
+            : '';
+
+        $articleEntries = [];
+        $cursorFound = false;
+
+        foreach ($orderedEntries as $url => $entry) {
+            // با رسیدن به اولین آدرس ثبت‌شده در اجرای قبلی، ادامه XML را نمی‌خوانیم.
+            if ($lastReadUrl !== '' && $url === $lastReadUrl) {
+                $cursorFound = true;
+                break;
+            }
+
+            $articleEntries[$url] = $entry;
+            if (count($articleEntries) >= $maxItems) {
+                break;
+            }
+        }
+
+        // نشانگر در ابتدای XML یعنی خبر تازه‌ای از اجرای قبلی اضافه نشده است.
+        if (!$articleEntries && $cursorFound) {
+            return [];
+        }
 
         $results = [];
         $metadataFailures = 0;
         $metadataErrors = [];
+
         foreach ($articleEntries as $url => $entry) {
             try {
                 $meta = $this->articleMetadata($url);
@@ -109,7 +121,8 @@ class FarsNewsSitemapReader implements SourceReaderInterface
         if (!$results) {
             $detail = $metadataErrors ? ' اولین خطا: ' . $metadataErrors[0] : '';
             throw new RuntimeException(
-                'از نقشه سایت ' . count($articleEntries) . ' آدرس خبر پیدا شد، اما عنوان هیچ‌کدام قابل استخراج نبود.' .
+                'از نقشه سایت امروز فارس ' . count($articleEntries) .
+                ' آدرس خبر انتخاب شد، اما عنوان هیچ‌کدام قابل استخراج نبود.' .
                 ' تعداد پاسخ‌های ناموفق/بدون عنوان: ' . $metadataFailures . '.' . $detail .
                 ' اگر خطا HTTP 403 یا 429 است، احتمالاً دسترسی هاست به صفحه خبر محدود شده است.'
             );

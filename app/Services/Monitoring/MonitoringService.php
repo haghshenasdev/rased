@@ -45,9 +45,15 @@ class MonitoringService
                 $externalId = $this->safeExternalId((string) $item->externalId);
                 $lastExternalId = $externalId;
 
-                // لینک آخرین آیتمی که در این نوبت خوانده می‌شود را مستقل از کلمه کلیدی نگه دار.
-                // بنابراین خبر تکراری، بلک‌لیست‌شده یا بدون کلمه کلیدی هم لینک خود را ثبت می‌کند.
-                $lastItemUrl = !empty($item->url) ? (string) $item->url : $lastItemUrl;
+                // برای نقشه روزانه فارس، نشانگر باید جدیدترین خبرِ دسته (اولین آیتم) باشد؛
+                // در منابع دیگر رفتار قبلی، یعنی نگه‌داشتن آخرین آیتم پیمایش‌شده، حفظ می‌شود.
+                if (!empty($item->url)) {
+                    if ($source->type === 'farsnews_sitemap') {
+                        $lastItemUrl ??= (string) $item->url;
+                    } else {
+                        $lastItemUrl = (string) $item->url;
+                    }
+                }
                 $exists = SourceItem::query()
                     ->where('source_id', $source->id)
                     ->where('external_id', $externalId)
@@ -93,6 +99,14 @@ class MonitoringService
 
             $source->last_item_id = $lastExternalId ?? $source->last_item_id;
             $source->last_item_url = $lastItemUrl ?? $source->last_item_url;
+
+            // ثبت نسخه نشانگر برای سازگاری با نشانگر قدیمی که در انتهای دسته ذخیره می‌شد.
+            if ($source->type === 'farsnews_sitemap') {
+                $settings = is_array($source->settings) ? $source->settings : [];
+                $settings['farsnews_sitemap_cursor_mode'] = 'newest_first_v1';
+                $source->settings = $settings;
+            }
+
             $source->last_read_at = now('Asia/Tehran');
             $source->save();
 
