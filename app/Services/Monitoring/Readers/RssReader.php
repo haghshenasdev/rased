@@ -80,10 +80,14 @@ class RssReader implements SourceReaderInterface
             ->timeout($this->rssTimeout)
             ->retry(2, 1200, function ($exception, $request) {
                 $status = method_exists($exception, 'response') ? $exception->response?->status() : null;
-                return $status === null || in_array($status, [408, 425, 429, 500, 502, 503, 504], true);
+                return $status === null || in_array($status, [408, 425, 500, 502, 504], true);
             })
             ->withHeaders([
-                'User-Agent' => 'RasedNewsMonitor/1.0 (+RSS reader; contact site administrator)',
+                'User-Agent' =>
+                            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' .
+                            'AppleWebKit/537.36 ' .
+                            '(KHTML, like Gecko) ' .
+                            'Chrome/139.0 Safari/537.36',
 
                 'Accept' =>
                     'application/rss+xml, application/atom+xml, ' .
@@ -956,11 +960,11 @@ class RssReader implements SourceReaderInterface
                     1500,
                     function ($exception, $request) {
                         $status = method_exists($exception, 'response') ? $exception->response?->status() : null;
-                        return $status === null || in_array($status, [408, 425, 429, 500, 502, 503, 504], true);
+                        return $status === null || in_array($status, [408, 425, 500, 502, 504], true);
                     }
                 )
                 ->withHeaders([
-                    'User-Agent' => 'RasedNewsMonitor/1.0 (+RSS reader; contact site administrator)',
+                    'User-Agent' => 'RasedNewsMonitor/1.0 (+news monitoring; respects publisher access limits)',
 
                     'Accept' =>
                         'text/html,application/xhtml+xml,' .

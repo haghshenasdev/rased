@@ -10,6 +10,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Morilog\Jalali\Jalalian;
 use Throwable;
 
 class SendNewsToBaleJob implements ShouldQueue
@@ -135,9 +136,7 @@ class SendNewsToBaleJob implements ShouldQueue
         if ($item->published_at) {
 
             $text .= "🕐 تاریخ: "
-                . $item->published_at->format(
-                    'Y/m/d H:i'
-                )
+                . Jalalian::fromCarbon($item->published_at->copy()->setTimezone('Asia/Tehran'))->format('Y/m/d H:i')
                 . "\n";
         }
 

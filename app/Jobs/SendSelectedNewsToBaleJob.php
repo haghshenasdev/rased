@@ -184,7 +184,7 @@ class SendSelectedNewsToBaleJob implements ShouldQueue
 
                 $date =
                     Jalalian::fromCarbon(
-                        $item->published_at
+                        $item->published_at->copy()->setTimezone('Asia/Tehran')
                     )->format(
                         'Y/m/d H:i'
                     );
