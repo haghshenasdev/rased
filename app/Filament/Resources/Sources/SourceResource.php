@@ -50,7 +50,8 @@ class SourceResource extends Resource
                     'html' => 'HTML',
                     'javascript' => 'JavaScript',
                     'browser' => 'Browser',
-                    'farsnews' => 'FarsNews',
+                    'farsnews' => 'FarsNews (جستجوی صفحه)',
+                    'farsnews_sitemap' => 'FarsNews Sitemap (عنوان و توضیحات)',
                 ])
                 ->required()->live(),
 
@@ -66,8 +67,9 @@ class SourceResource extends Resource
                 ->label('آدرس اصلی')
                 ->placeholder('https://example.com/feed')
                 ->url()
-                ->visible(fn ($get) => in_array($get('type'), ['rss','html','javascript','browser','farsnews']))
-                ->required(fn ($get) => in_array($get('type'), ['html','javascript','browser','farsnews'])),
+                ->visible(fn ($get) => in_array($get('type'), ['rss','html','javascript','browser','farsnews','farsnews_sitemap']))
+                ->required(fn ($get) => in_array($get('type'), ['html','javascript','browser','farsnews']))
+                ->helperText(fn ($get) => $get('type') === 'farsnews_sitemap' ? 'اختیاری؛ خالی بگذارید تا نقشه سایت سال جاری فارس به‌صورت خودکار انتخاب شود.' : null),
 
             Repeater::make('settings.feed_urls')
                 ->label('RSS / لینک‌های اضافی')
@@ -92,6 +94,18 @@ class SourceResource extends Resource
                 ->label('تعداد نتیجه Google')
                 ->numeric()->minValue(1)->maxValue(10)->default(10)
                 ->visible(fn ($get) => $get('type') === 'google'),
+
+            TextInput::make('settings.max_items')
+                ->label('حداکثر خبرهای بررسی‌شده از فارس')
+                ->numeric()->minValue(1)->maxValue(300)->default(100)
+                ->visible(fn ($get) => $get('type') === 'farsnews_sitemap')
+                ->helperText('تعداد URLهای جدیدتر که از نقشه سایت بررسی می‌شوند؛ برای کاهش درخواست‌ها مقدار کمتر انتخاب کنید.'),
+
+            TextInput::make('settings.lookback_days')
+                ->label('بازه بررسی نقشه سایت (روز)')
+                ->numeric()->minValue(1)->maxValue(14)->default(2)
+                ->visible(fn ($get) => $get('type') === 'farsnews_sitemap')
+                ->helperText('نقشه سایت امروز و روزهای قبل بررسی می‌شود؛ اطلاعات HTML هر خبر برای ۶ ساعت cache می‌شود.'),
 
             FileUpload::make('profile_image_path')
                 ->label('عکس پروفایل منبع')
@@ -134,6 +148,8 @@ class SourceResource extends Resource
                                 ),
                                 'query' => $get('settings.query'),
                                 'count' => $get('settings.count') ?: 10,
+                                'max_items' => $get('settings.max_items') ?: 100,
+                                'lookback_days' => $get('settings.lookback_days') ?: 2,
                             ],
                             'auto_categorize' => (bool)$get('auto_categorize'),
                             'ignore_link_keyword' => true,

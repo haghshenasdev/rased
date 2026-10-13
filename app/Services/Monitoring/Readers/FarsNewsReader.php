@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
 use Symfony\Component\DomCrawler\Crawler;
 use Throwable;
 
-class FarsNewsReader
+class FarsNewsReader implements SourceReaderInterface
 {
     /**
      * خواندن اخبار فارس نیوز
