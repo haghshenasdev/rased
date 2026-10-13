@@ -21,7 +21,7 @@ class QueueJobResource extends Resource
         'صف پردازش';
 
     protected static ?string $modelLabel =
-        'Job';
+        'وظیفه پردازشی';
 
     protected static ?string $pluralModelLabel =
         'صف پردازش';
@@ -43,6 +43,11 @@ class QueueJobResource extends Resource
                     ->label('ID')
                     ->sortable(),
 
+                Tables\Columns\TextColumn::make('description')
+                    ->label('شرح پردازش')
+                    ->getStateUsing(fn (QueueJob $record): string => $record->description())
+                    ->wrap(),
+
                 Tables\Columns\TextColumn::make('queue')
                     ->label('صف')
                     ->badge()
@@ -53,14 +58,17 @@ class QueueJobResource extends Resource
                     ->sortable(),
 
                 Tables\Columns\TextColumn::make('reserved_at')
-                    ->label('در حال اجرا')->jalaliDateTime('Y/m/d H:i')
-                    ->placeholder('در انتظار'),
+                    ->label('وضعیت / زمان اجرا')
+                    ->jalaliDateTime('Y/m/d H:i')
+                    ->placeholder('در انتظار اجرا'),
 
                 Tables\Columns\TextColumn::make('available_at')
-                    ->label('قابل اجرا')->jalaliDateTime('Y/m/d H:i'),
+                    ->label('قابل اجرا')
+                    ->jalaliDateTime('Y/m/d H:i'),
 
                 Tables\Columns\TextColumn::make('created_at')
-                    ->label('ایجاد')->jalaliDateTime('Y/m/d H:i'),
+                    ->label('ایجاد')
+                    ->jalaliDateTime('Y/m/d H:i'),
 
             ])
             ->defaultSort('id', 'desc')
