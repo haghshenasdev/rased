@@ -24,8 +24,25 @@ class FarsNewsSitemapReader implements SourceReaderInterface
         $settings = is_array($source->settings) ? $source->settings : [];
         $maxItems = min(300, max(1, (int) ($settings['max_items'] ?? 100)));
 
-        // فقط نقشه XML امروز خوانده می‌شود؛ ترتیب خود XML (جدید به قدیم) حفظ می‌شود.
+        // نام کاربری‌ها با خط جدید یا ویرگول جدا می‌شوند؛ خالی بودن یعنی همه نویسندگان.
+        $authorsRaw = $settings['farsnews_authors'] ?? '';
+        if (is_array($authorsRaw)) {
+            $authors = $authorsRaw;
+        } else {
+            $authors = preg_split('/[\r\n,،;]+/u', (string) $authorsRaw) ?: [];
+        }
+        $authors = array_values(array_unique(array_filter(array_map(
+            static function ($author): string {
+                $author = trim((string) $author);
+                $author = preg_replace('~^https?://(?:www\.)?farsnews\.ir/~i', '', $author) ?? $author;
+                return trim($author, " \t\n\r\0\x0B/@");
+            },
+            $authors
+        ), static fn (string $author): bool => $author !== '')));
+
+        // فقط نقشه XML امروز دریافت می‌شود و ترتیب اصلی آن (جدید به قدیم) حفظ می‌شود.
         $today = now('Asia/Tehran')->startOfDay();
+        $todayDate = $today->toDateString();
         $todaySitemap = $this->dailySitemapUrl($today);
 
         $orderedEntries = [];
@@ -36,7 +53,6 @@ class FarsNewsSitemapReader implements SourceReaderInterface
                     continue;
                 }
 
-                // ترتیب اصلی فایل XML حفظ می‌شود و هیچ مرتب‌سازی مجددی نداریم.
                 $orderedEntries[$url] = [
                     'url' => $url,
                     'lastmod' => $entry['lastmod'],
@@ -55,39 +71,65 @@ class FarsNewsSitemapReader implements SourceReaderInterface
             );
         }
 
-        // نسخه قبلی را یک بار بدون اتکا به نشانگر قدیمی اجرا می‌کنیم؛
-        // نسخه قبلی نشانگر را روی قدیمی‌ترین خبرِ دسته ذخیره می‌کرد.
-        $cursorMode = (string) ($settings['farsnews_sitemap_cursor_mode'] ?? '');
-        $lastReadUrl = $cursorMode === 'newest_first_v1'
-            ? trim((string) $source->last_item_url)
-            : '';
+        // وضعیت پیمایش جدا از last_item_url نگهداری می‌شود؛ چون max_items ممکن است
+        // باعث شود پردازش خبرهای جدید در چند نوبت تکمیل شود.
+        $scanDate = (string) ($settings['farsnews_sitemap_scan_date'] ?? '');
+        $cursorUrl = trim((string) ($settings['farsnews_sitemap_cursor_url'] ?? ''));
+        $seenUrls = $settings['farsnews_sitemap_seen_urls'] ?? [];
+        if (!is_array($seenUrls)) {
+            $seenUrls = [];
+        }
+        $seenSet = array_fill_keys(array_map('strval', $seenUrls), true);
 
-        $articleEntries = [];
-        $cursorFound = false;
-
-        foreach ($orderedEntries as $url => $entry) {
-            // با رسیدن به اولین آدرس ثبت‌شده در اجرای قبلی، ادامه XML را نمی‌خوانیم.
-            if ($lastReadUrl !== '' && $url === $lastReadUrl) {
-                $cursorFound = true;
-                break;
-            }
-
-            $articleEntries[$url] = $entry;
-            if (count($articleEntries) >= $maxItems) {
-                break;
+        if ($scanDate !== $todayDate) {
+            // هر روز فقط نقشه همان روز ملاک است؛ وضعیت پیمایش روز قبل پاک می‌شود.
+            $cursorUrl = '';
+            $seenSet = [];
+        } elseif ($cursorUrl === '' && ($settings['farsnews_sitemap_cursor_mode'] ?? '') === 'newest_first_v1') {
+            // مهاجرت از نشانگر نسخه قبلی، فقط وقتی لینک در نقشه امروز وجود داشته باشد.
+            $legacyUrl = trim((string) $source->last_item_url);
+            if ($legacyUrl !== '' && isset($orderedEntries[$legacyUrl])) {
+                $cursorUrl = $legacyUrl;
             }
         }
 
-        // نشانگر در ابتدای XML یعنی خبر تازه‌ای از اجرای قبلی اضافه نشده است.
-        if (!$articleEntries && $cursorFound) {
-            return [];
+        $cursorExistsInToday = $cursorUrl !== '' && isset($orderedEntries[$cursorUrl]);
+        if ($cursorUrl !== '' && !$cursorExistsInToday) {
+            // نشانگر متعلق به روز قبل/نقشه قدیمی است؛ امروز از ابتدای نقشه شروع می‌کنیم.
+            $cursorUrl = '';
+            $seenSet = [];
         }
 
         $results = [];
         $metadataFailures = 0;
         $metadataErrors = [];
+        $attempted = 0;
+        $limitReached = false;
+        $reachedCursor = false;
 
-        foreach ($articleEntries as $url => $entry) {
+        foreach ($orderedEntries as $url => $entry) {
+            // به نشانگرِ آخرین پیمایش کامل رسیده‌ایم؛ آدرس‌های قدیمی‌تر متعلق به گذشته‌اند.
+            if ($cursorUrl !== '' && $url === $cursorUrl) {
+                $reachedCursor = true;
+                break;
+            }
+
+            // فیلتر نویسنده قبل از هر درخواست به صفحه خبر اعمال می‌شود.
+            if (!$this->matchesAuthor($url, $authors)) {
+                continue;
+            }
+
+            // این لینک در یک نوبت قبلی از همین پیمایش باز شده است؛ دوباره درخواست نمی‌زنیم.
+            if (isset($seenSet[$url])) {
+                continue;
+            }
+
+            if ($attempted >= $maxItems) {
+                $limitReached = true;
+                break;
+            }
+            $attempted++;
+
             try {
                 $meta = $this->articleMetadata($url);
                 if (!$meta || $meta['title'] === '') {
@@ -96,6 +138,8 @@ class FarsNewsSitemapReader implements SourceReaderInterface
                     continue;
                 }
 
+                // فقط پس از استخراج موفق متادیتا، URL را بازشده علامت می‌زنیم.
+                $seenSet[$url] = true;
                 $publishedAt = $this->parseDate($meta['published_at'] ?: $entry['lastmod']);
                 $results[] = new SourceItemData(
                     externalId: sha1($url),
@@ -106,6 +150,7 @@ class FarsNewsSitemapReader implements SourceReaderInterface
                     featuredImageUrl: $meta['image'] ?: null,
                     rawData: [
                         'source' => 'farsnews_sitemap',
+                        'author' => $this->authorFromUrl($url),
                         'description' => $meta['description'],
                         'sitemap_lastmod' => $entry['lastmod'],
                         'metadata_only' => true,
@@ -118,17 +163,65 @@ class FarsNewsSitemapReader implements SourceReaderInterface
             }
         }
 
-        if (!$results) {
+        // اگر به نشانگر رسیدیم یا کل نقشه را پیمودیم، پیمایش کامل شده است.
+        // نشانگر به ابتدای XML فعلی منتقل می‌شود تا اجرای بعدی فقط لینک‌های تازه‌تر را ببیند.
+        $scanComplete = !$limitReached && $metadataFailures === 0
+            && ($reachedCursor || ($cursorUrl === '' && !$cursorExistsInToday));
+        if ($scanComplete) {
+            $settings['farsnews_sitemap_cursor_url'] = (string) array_key_first($orderedEntries);
+            $settings['farsnews_sitemap_seen_urls'] = [];
+        } else {
+            $settings['farsnews_sitemap_cursor_url'] = $cursorUrl;
+            $settings['farsnews_sitemap_seen_urls'] = array_values(array_keys($seenSet));
+        }
+        $settings['farsnews_sitemap_scan_date'] = $todayDate;
+        $settings['farsnews_sitemap_cursor_mode'] = 'newest_first_v1';
+        $source->settings = $settings;
+
+        if (!$results && $metadataFailures > 0) {
             $detail = $metadataErrors ? ' اولین خطا: ' . $metadataErrors[0] : '';
             throw new RuntimeException(
-                'از نقشه سایت امروز فارس ' . count($articleEntries) .
-                ' آدرس خبر انتخاب شد، اما عنوان هیچ‌کدام قابل استخراج نبود.' .
+                'از نقشه سایت امروز فارس ' . $attempted .
+                ' آدرسِ منطبق با نویسندگان انتخاب‌شده بررسی شد، اما عنوان هیچ‌کدام قابل استخراج نبود.' .
                 ' تعداد پاسخ‌های ناموفق/بدون عنوان: ' . $metadataFailures . '.' . $detail .
                 ' اگر خطا HTTP 403 یا 429 است، احتمالاً دسترسی هاست به صفحه خبر محدود شده است.'
             );
         }
 
+        // نبودن خبر از نویسندگان انتخاب‌شده، خطا نیست.
         return $results;
+    }
+
+    /**
+     * تطبیق نام نویسنده با اولین بخش مسیر؛ مثلاً /NargesJafari/...
+     *
+     * @param array<int,string> $authors
+     */
+    private function matchesAuthor(string $url, array $authors): bool
+    {
+        if ($authors === []) {
+            return true;
+        }
+
+        $author = $this->authorFromUrl($url);
+        foreach ($authors as $wanted) {
+            if (mb_strtolower($author, 'UTF-8') === mb_strtolower($wanted, 'UTF-8')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function authorFromUrl(string $url): string
+    {
+        $path = trim((string) parse_url($url, PHP_URL_PATH), '/');
+        if ($path === '') {
+            return '';
+        }
+
+        $segments = explode('/', $path);
+        return trim((string) ($segments[0] ?? ''));
     }
 
     private function dailySitemapUrl(Carbon $date): string

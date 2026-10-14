@@ -95,17 +95,18 @@ class SourceResource extends Resource
                 ->numeric()->minValue(1)->maxValue(10)->default(10)
                 ->visible(fn ($get) => $get('type') === 'google'),
 
+            Textarea::make('settings.farsnews_authors')
+                ->label('نام کاربری نویسندگان فارس')
+                ->placeholder("NargesJafari\nMaryamKarami")
+                ->rows(3)
+                ->visible(fn ($get) => $get('type') === 'farsnews_sitemap')
+                ->helperText('هر نام کاربری را در یک خط وارد کنید؛ ویرگول هم قابل استفاده است. فقط لینک‌هایی مانند farsnews.ir/NargesJafari/... باز می‌شوند. خالی گذاشتن این کادر یعنی بررسی همه نویسندگان.'),
+
             TextInput::make('settings.max_items')
-                ->label('حداکثر خبرهای بررسی‌شده از فارس')
+                ->label('حداکثر صفحه خبر برای بازکردن در هر نوبت')
                 ->numeric()->minValue(1)->maxValue(300)->default(100)
                 ->visible(fn ($get) => $get('type') === 'farsnews_sitemap')
-                ->helperText('تعداد URLهای جدیدتر که از نقشه سایت بررسی می‌شوند؛ برای کاهش درخواست‌ها مقدار کمتر انتخاب کنید.'),
-
-            TextInput::make('settings.lookback_days')
-                ->label('بازه بررسی نقشه سایت (روز)')
-                ->numeric()->minValue(1)->maxValue(14)->default(2)
-                ->visible(fn ($get) => $get('type') === 'farsnews_sitemap')
-                ->helperText('نقشه سایت امروز و روزهای قبل بررسی می‌شود؛ اطلاعات HTML هر خبر برای ۶ ساعت cache می‌شود.'),
+                ->helperText('این تعداد فقط از میان لینک‌های نویسندگان انتخاب‌شده محاسبه می‌شود. اگر لینک‌های جدید بیشتر باشند، بقیه در نوبت‌های بعدی و بدون بازکردن دوباره لینک‌های قبلی بررسی می‌شوند.'),
 
             FileUpload::make('profile_image_path')
                 ->label('عکس پروفایل منبع')
@@ -149,7 +150,7 @@ class SourceResource extends Resource
                                 'query' => $get('settings.query'),
                                 'count' => $get('settings.count') ?: 10,
                                 'max_items' => $get('settings.max_items') ?: 100,
-                                'lookback_days' => $get('settings.lookback_days') ?: 2,
+                                'farsnews_authors' => $get('settings.farsnews_authors') ?: '',
                             ],
                             'auto_categorize' => (bool)$get('auto_categorize'),
                             'ignore_link_keyword' => true,
