@@ -15,6 +15,7 @@ class SourceReaderFactory
             'browser', 'html', 'javascript' => app(BrowserReader::class),
             'farsnews' => app(FarsNewsReader::class),
             'farsnews_sitemap' => app(FarsNewsSitemapReader::class),
+            'aparat_sitemap' => app(AparatSitemapReader::class),
             'google' => app(GoogleSearchReader::class),
             default => throw new InvalidArgumentException("برای نوع منبع [{$source->type}] Reader وجود ندارد."),
         };

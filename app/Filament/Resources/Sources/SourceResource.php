@@ -52,6 +52,7 @@ class SourceResource extends Resource
                     'browser' => 'Browser',
                     'farsnews' => 'FarsNews (جستجوی صفحه)',
                     'farsnews_sitemap' => 'FarsNews Sitemap (عنوان و توضیحات)',
+                    'aparat_sitemap' => 'آپارات (آخرین ویدئوها از سایت‌مپ)',
                 ])
                 ->required()->live(),
 
@@ -67,9 +68,13 @@ class SourceResource extends Resource
                 ->label('آدرس اصلی')
                 ->placeholder('https://example.com/feed')
                 ->url()
-                ->visible(fn ($get) => in_array($get('type'), ['rss','html','javascript','browser','farsnews','farsnews_sitemap']))
+                ->visible(fn ($get) => in_array($get('type'), ['rss','html','javascript','browser','farsnews','farsnews_sitemap','aparat_sitemap']))
                 ->required(fn ($get) => in_array($get('type'), ['html','javascript','browser','farsnews']))
-                ->helperText(fn ($get) => $get('type') === 'farsnews_sitemap' ? 'اختیاری؛ خالی بگذارید تا نقشه سایت سال جاری فارس به‌صورت خودکار انتخاب شود.' : null),
+                ->helperText(fn ($get) => match ($get('type')) {
+                    'farsnews_sitemap' => 'اختیاری؛ خالی بگذارید تا نقشه سایت سال جاری فارس به‌صورت خودکار انتخاب شود.',
+                    'aparat_sitemap' => 'آدرس پیش‌فرض: https://www.aparat.com/sitemap_1.xml — در صورت نیاز می‌توانید آدرس سایت‌مپ دیگری وارد کنید.',
+                    default => null,
+                }),
 
             Repeater::make('settings.feed_urls')
                 ->label('RSS / لینک‌های اضافی')
@@ -107,6 +112,12 @@ class SourceResource extends Resource
                 ->numeric()->minValue(1)->maxValue(300)->default(100)
                 ->visible(fn ($get) => $get('type') === 'farsnews_sitemap')
                 ->helperText('این تعداد فقط از میان لینک‌های نویسندگان انتخاب‌شده محاسبه می‌شود. اگر لینک‌های جدید بیشتر باشند، بقیه در نوبت‌های بعدی و بدون بازکردن دوباره لینک‌های قبلی بررسی می‌شوند.'),
+
+            TextInput::make('settings.max_items')
+                ->label('حداکثر ویدئوی آپارات برای بررسی در هر نوبت')
+                ->numeric()->minValue(1)->maxValue(1000)->default(200)
+                ->visible(fn ($get) => $get('type') === 'aparat_sitemap')
+                ->helperText('فقط ویدئوهای جدیدتر از نشانگر آخرین پیمایش بررسی می‌شوند. اگر تعداد ویدئوهای جدید بیشتر باشد، ادامه آن در اجرای بعدی انجام می‌شود.'),
 
             FileUpload::make('profile_image_path')
                 ->label('عکس پروفایل منبع')
