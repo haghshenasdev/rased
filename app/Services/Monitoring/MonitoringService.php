@@ -60,7 +60,8 @@ class MonitoringService
                     ->exists();
                 if ($exists) { $stats['duplicate']++; continue; }
 
-                $content = trim(($item->title ?? '') . "\n\n" . ($item->content ?? ''));
+                $keywordContent = $item->keywordSearchContent ?? $item->content ?? '';
+                $content = trim(($item->title ?? '') . "\n\n" . $keywordContent);
                 if ($this->blacklistMatcher->hasMatch($content)) { $stats['blacklisted']++; continue; }
 
                 // The link itself is deliberately NOT part of keyword matching.

@@ -15,6 +15,8 @@ use SimpleXMLElement;
 
 class RssReader implements SourceReaderInterface
 {
+    /** Text extracted from the same article page after removing anchor text. */
+    private ?string $lastKeywordSearchContent = null;
     /**
      * حداقل طول متن قابل قبول.
      */
@@ -222,15 +224,24 @@ class RssReader implements SourceReaderInterface
                  * حتی اگر RSS محتوای کامل داشته باشد.
                  */
                 $pageContent = null;
+                $keywordSearchContent = null;
 
                 if ($link !== '') {
+                    $this->lastKeywordSearchContent = null;
                     $pageContent =
                         $this->fetchArticleContent(
                             $link,
                             $title
                         );
+                    $keywordSearchContent = $this->lastKeywordSearchContent;
 
                     $featuredImage ??= $this->lastFeaturedImage;
+                }
+
+                if ($keywordSearchContent === null) {
+                    $keywordSearchContent = $this->htmlToText(
+                        $this->removeAnchorElements($rssContent)
+                    );
                 }
 
                 /*
@@ -326,6 +337,7 @@ class RssReader implements SourceReaderInterface
                     publishedAt: $publishedAt?->setTimezone('Asia/Tehran'),
                     featuredImageUrl: $featuredImage,
                     rawData: $rawData,
+                    keywordSearchContent: $keywordSearchContent,
                 );
 
             } catch (\Throwable $e) {
@@ -689,15 +701,24 @@ class RssReader implements SourceReaderInterface
                  * باز می‌شود.
                  */
                 $pageContent = null;
+                $keywordSearchContent = null;
 
                 if ($link !== '') {
+                    $this->lastKeywordSearchContent = null;
                     $pageContent =
                         $this->fetchArticleContent(
                             $link,
                             $title
                         );
+                    $keywordSearchContent = $this->lastKeywordSearchContent;
 
                     $featuredImage ??= $this->lastFeaturedImage;
+                }
+
+                if ($keywordSearchContent === null) {
+                    $keywordSearchContent = $this->htmlToText(
+                        $this->removeAnchorElements($rssContent)
+                    );
                 }
 
                 /*
@@ -750,6 +771,9 @@ class RssReader implements SourceReaderInterface
 
                         publishedAt:
                         $publishedAt,
+
+                        keywordSearchContent:
+                        $keywordSearchContent,
 
                         rawData: [
                             'id' => $id,
@@ -1022,6 +1046,12 @@ class RssReader implements SourceReaderInterface
                     $title
                 );
 
+            $htmlWithoutLinkText = $this->removeAnchorElements($html);
+            $this->lastKeywordSearchContent = $this->extractArticleFromHtml(
+                $htmlWithoutLinkText,
+                $title
+            ) ?? '';
+
             if ($content === null) {
                 logger()->debug(
                     'محتوای اصلی صفحه خبر پیدا نشد',
@@ -1080,6 +1110,28 @@ class RssReader implements SourceReaderInterface
             }
         }
         return null;
+    }
+
+    /** Remove anchor elements before building the keyword matching corpus. */
+    protected function removeAnchorElements(string $html): string
+    {
+        libxml_use_internal_errors(true);
+        $dom = new DOMDocument();
+        $loaded = @$dom->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NOERROR | LIBXML_NOWARNING | LIBXML_NONET);
+        libxml_clear_errors();
+        if (!$loaded) {
+            return $html;
+        }
+
+        $anchors = $dom->getElementsByTagName('a');
+        for ($i = $anchors->length - 1; $i >= 0; $i--) {
+            $anchor = $anchors->item($i);
+            if ($anchor?->parentNode) {
+                $anchor->parentNode->removeChild($anchor);
+            }
+        }
+
+        return $dom->saveHTML() ?: $html;
     }
 
     protected function absoluteUrl(string $url, string $baseUrl): string

@@ -14,6 +14,7 @@ class SourceItemData
         public readonly ?Carbon $publishedAt = null,
         public readonly ?string $featuredImageUrl = null,
         public readonly array $rawData = [],
+        public readonly ?string $keywordSearchContent = null,
     ) {}
 
     public function toArray(): array
@@ -26,6 +27,7 @@ class SourceItemData
             'published_at' => $this->publishedAt,
             'featured_image_url' => $this->featuredImageUrl,
             'raw_data' => $this->rawData,
+            'keyword_search_content' => $this->keywordSearchContent,
         ];
     }
 }
