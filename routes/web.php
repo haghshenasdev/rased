@@ -121,8 +121,10 @@ Route::middleware('auth')->prefix('panel')->name('panel.')->group(function () {
     Route::get('/manage/{section}', [\App\Http\Controllers\PanelManagementController::class, 'index'])->name('manage.index');
     Route::get('/manage/{section}/create', [\App\Http\Controllers\PanelManagementController::class, 'create'])->name('manage.create');
     Route::post('/manage/{section}', [\App\Http\Controllers\PanelManagementController::class, 'store'])->name('manage.store');
+    Route::post('/manage/sources/profile-images/find-all', [\App\Http\Controllers\PanelManagementController::class, 'findAllSourceProfileImages'])->name('manage.sources.profile-images.find-all');
     Route::post('/manage/sources/{record}/check', [\App\Http\Controllers\PanelManagementController::class, 'checkSource'])->whereNumber('record')->name('manage.sources.check');
     Route::post('/manage/sources/{record}/test', [\App\Http\Controllers\PanelManagementController::class, 'testSource'])->whereNumber('record')->name('manage.sources.test');
+    Route::post('/manage/sources/{record}/profile-image/find', [\App\Http\Controllers\PanelManagementController::class, 'findSourceProfileImage'])->whereNumber('record')->name('manage.sources.profile-image.find');
     Route::get('/manage/source-items/{record}/send', [\App\Http\Controllers\PanelManagementController::class, 'sendForm'])->whereNumber('record')->name('manage.source-items.send-form');
     Route::post('/manage/source-items/{record}/send', [\App\Http\Controllers\PanelManagementController::class, 'sendToSubscribers'])->whereNumber('record')->name('manage.source-items.send');
     Route::get('/manage/{section}/{record}/edit', [\App\Http\Controllers\PanelManagementController::class, 'edit'])->whereNumber('record')->name('manage.edit');

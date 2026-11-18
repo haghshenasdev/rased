@@ -22,7 +22,7 @@
       <label class="{{ $label }}">منبع والد<select name="parent_id" class="{{ $input }}"><option value="">بدون والد</option>@foreach($sources as $source)@if(!$record || $record->id!==$source->id)<option value="{{ $source->id }}" @selected((string)$value('parent_id')===(string)$source->id)>{{ $source->name }}</option>@endif @endforeach</select></label>
       <label class="{{ $label }}">دسته‌ی پیش‌فرض<select name="default_category_id" class="{{ $input }}"><option value="">بدون دسته</option>@foreach($categories as $category)<option value="{{ $category->id }}" @selected((string)$value('default_category_id')===(string)$category->id)>{{ $category->name }}</option>@endforeach</select></label>
       <label class="{{ $label }}">شناسه‌ی کانال ایتا<input name="identifier" value="{{ $value('identifier') }}" class="{{ $input }}"></label>
-      <label class="{{ $label }}">لینک تصویر پروفایل<input name="profile_image_url" type="url" value="{{ $value('profile_image_url') }}" class="{{ $input }}"></label>
+      <div class="sm:col-span-2"><label class="{{ $label }}">لینک تصویر پروفایل<input id="profile-image-url" name="profile_image_url" type="url" value="{{ $value('profile_image_url') }}" class="{{ $input }}"></label>@if($editing)<div class="mt-2 flex flex-wrap items-center gap-3"><button id="find-source-profile-image" type="button" data-action="{{ route('panel.manage.sources.profile-image.find',$record->id) }}" class="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-extrabold text-violet-800 hover:bg-violet-100">پیداکردن خودکار تصویر این منبع</button><span id="profile-image-finder-status" class="text-xs text-slate-500" role="status"></span></div>@endif</div>
       <label class="{{ $label }}">مسیر تصویر بارگذاری‌شده<input name="profile_image_path" value="{{ $value('profile_image_path') }}" placeholder="source-profiles/example.png" class="{{ $input }}"></label>
       <label class="{{ $label }} sm:col-span-2">RSSهای اضافی <small class="font-normal text-slate-400">هر آدرس را در یک خط بنویسید</small><textarea name="feed_urls" rows="3" class="{{ $input }}">{{ old('feed_urls', implode("\n", $settings['feed_urls'] ?? [])) }}</textarea></label>
       <label class="{{ $label }}">عبارت جست‌وجوی گوگل<input name="google_query" value="{{ old('google_query',$settings['query'] ?? '') }}" class="{{ $input }}"></label>
@@ -45,3 +45,30 @@
   </form>
 </div>
 @endsection
+@push('scripts')
+<script>
+document.getElementById('find-source-profile-image')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  const status = document.getElementById('profile-image-finder-status');
+  const imageField = document.getElementById('profile-image-url');
+  const pathField = document.querySelector('[name="profile_image_path"]');
+  button.disabled = true;
+  status.textContent = 'در حال بررسی صفحه منبع…';
+  try {
+    const response = await fetch(button.dataset.action, {
+      method: 'POST',
+      headers: {'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content, 'Accept': 'application/json'}
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'پیداکردن تصویر ناموفق بود.');
+    imageField.value = result.url;
+    if (pathField) pathField.value = '';
+    status.textContent = result.message;
+  } catch (error) {
+    status.textContent = error.message || 'پیداکردن تصویر ناموفق بود.';
+  } finally {
+    button.disabled = false;
+  }
+});
+</script>
+@endpush

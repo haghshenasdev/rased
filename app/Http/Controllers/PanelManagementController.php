@@ -12,6 +12,7 @@ use App\Models\Source;
 use App\Models\SourceItem;
 use App\Jobs\SendSelectedNewsToBaleJob;
 use App\Services\Monitoring\Readers\SourceReaderFactory;
+use App\Services\SourceProfileImageFinder;
 use App\Jobs\CheckSourceJob;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -152,6 +153,47 @@ class PanelManagementController extends Controller
         } catch (Throwable $exception) {
             return back()->with('error', 'تست خواندن منبع ناموفق بود: '.$exception->getMessage());
         }
+    }
+
+    public function findSourceProfileImage(Request $request, int $record, SourceProfileImageFinder $finder)
+    {
+        $source = Source::query()->findOrFail($record);
+
+        try {
+            $imageUrl = $finder->findAndSave($source);
+            if (!$imageUrl) {
+                $message = 'تصویری در صفحه این منبع پیدا نشد.';
+                return $request->expectsJson()
+                    ? response()->json(['message' => $message], 404)
+                    : back()->with('error', $message);
+            }
+
+            return $request->expectsJson()
+                ? response()->json(['url' => $imageUrl, 'message' => 'تصویر پروفایل پیدا و ذخیره شد.'])
+                : back()->with('success', 'تصویر پروفایل منبع پیدا و ذخیره شد.');
+        } catch (Throwable $exception) {
+            return $request->expectsJson()
+                ? response()->json(['message' => $exception->getMessage()], 422)
+                : back()->with('error', 'پیداکردن تصویر ناموفق بود: ' . $exception->getMessage());
+        }
+    }
+
+    public function findAllSourceProfileImages(SourceProfileImageFinder $finder)
+    {
+        $counts = ['found' => 0, 'missing' => 0, 'failed' => 0];
+
+        Source::query()->orderBy('id')->chunkById(25, function ($sources) use ($finder, &$counts) {
+            foreach ($sources as $source) {
+                try {
+                    $finder->findAndSave($source) ? $counts['found']++ : $counts['missing']++;
+                } catch (Throwable) {
+                    $counts['failed']++;
+                }
+            }
+        });
+
+        $message = "پیداکردن تصویر منابع تمام شد؛ {$counts['found']} تصویر ذخیره شد، {$counts['missing']} تصویر پیدا نشد و {$counts['failed']} منبع خطا داشت.";
+        return back()->with($counts['failed'] || $counts['missing'] ? 'warning' : 'success', $message);
     }
 
     public function sendForm(int $record)
