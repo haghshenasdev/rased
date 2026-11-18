@@ -8,6 +8,11 @@ use Illuminate\Http\Request;
 
 class HomeController extends Controller
 {
+    public function landing()
+    {
+        return view('landing');
+    }
+
     public function index(Request $request)
     {
         $query = SourceItem::query()

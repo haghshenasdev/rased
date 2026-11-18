@@ -104,8 +104,15 @@ Route::middleware('auth')->get('/monitoring/run', function () {
 
 Route::get('/', [
     HomeController::class,
-    'index'
+    'landing'
 ])->name('home');
+
+Route::get('/news', [HomeController::class, 'index'])->name('news.index');
+
+Route::middleware('auth')->prefix('panel')->name('panel.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\PanelController::class, 'index'])->name('index');
+    Route::get('/news', [\App\Http\Controllers\PanelController::class, 'news'])->name('news');
+});
 
 Route::get('/news/{sourceItem}', [
     NewsController::class,

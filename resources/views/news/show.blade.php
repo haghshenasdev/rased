@@ -34,8 +34,8 @@
 @endphp
 <header class="no-print sticky top-0 z-20 border-b border-white/80 bg-white/75 backdrop-blur-xl">
   <div class="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
-    <a href="{{ route('home') }}" class="flex items-center gap-3"><span class="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-600 to-sky-600 text-white grid place-items-center font-black text-lg shadow-lg">ر</span><span><b class="text-lg font-black">راصد</b><span class="block text-[11px] text-slate-500">پایش هوشمند رسانه‌ها</span></span></a>
-    <div class="flex items-center gap-2"><button onclick="window.print()" class="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-bold hover:border-emerald-300 transition">🖨️ چاپ خبر</button><a href="{{ route('home') }}" class="rounded-xl bg-slate-900 text-white px-3.5 py-2.5 text-sm font-bold hover:bg-slate-700 transition">← بازگشت</a></div>
+    <a href="{{ route('news.index') }}" class="flex items-center gap-3"><span class="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-600 to-sky-600 text-white grid place-items-center font-black text-lg shadow-lg">ر</span><span><b class="text-lg font-black">راصد</b><span class="block text-[11px] text-slate-500">پایش هوشمند رسانه‌ها</span></span></a>
+    <div class="flex items-center gap-2"><button onclick="window.print()" class="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-bold hover:border-emerald-300 transition">🖨️ چاپ خبر</button><a href="{{ route('news.index') }}" class="rounded-xl bg-slate-900 text-white px-3.5 py-2.5 text-sm font-bold hover:bg-slate-700 transition">← بازگشت</a></div>
   </div>
 </header>
 <main class="max-w-5xl mx-auto px-4 sm:px-6 py-7 sm:py-10">
@@ -72,7 +72,7 @@
       <div class="print-header hidden mt-8 border-t pt-4 text-xs text-slate-500">منتشرشده در راصد · {{ $jalaliDate ?? 'زمان نامشخص' }} · منبع: {{ $sourceItem->source?->name ?? 'نامشخص' }}</div>
     </div>
   </article>
-  <div class="no-print flex justify-center mt-6"><a href="{{ route('home') }}" class="rounded-xl border border-white bg-white/80 px-5 py-3 text-sm font-bold text-slate-700 hover:text-emerald-700">بازگشت به فهرست خبرها</a></div>
+  <div class="no-print flex justify-center mt-6"><a href="{{ route('news.index') }}" class="rounded-xl border border-white bg-white/80 px-5 py-3 text-sm font-bold text-slate-700 hover:text-emerald-700">بازگشت به فهرست خبرها</a></div>
 </main>
 <footer class="no-print text-center text-xs text-slate-400 pb-8">راصد؛ پایش و دسته‌بندی هوشمند اخبار</footer>
 </body></html>
