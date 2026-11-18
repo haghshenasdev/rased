@@ -12,6 +12,7 @@ use App\Models\SourceItem;
 use App\Jobs\CheckSourceJob;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Morilog\Jalali\Jalalian;
 
 class PanelController extends Controller
 {
@@ -34,24 +35,43 @@ class PanelController extends Controller
 
     public function index(Request $request)
     {
-        $days = (int) $request->query('range', 7);
-        $days = in_array($days, [7, 30], true) ? $days : 7;
         $now = now('Asia/Tehran');
-        $start = $now->copy()->subDays($days - 1)->startOfDay();
-        $end = $now->copy()->endOfDay();
+        $range = (string) $request->query('range', '30');
+        $range = in_array($range, ['30', 'year'], true) ? $range : '30';
+        $jNow = Jalalian::fromCarbon($now);
 
-        // Build day buckets from the requested range, oldest first.
-        $daily = collect(range($days - 1, 0))->map(fn (int $offset) => $now->copy()->subDays($offset));
-        $countsByDate = SourceItem::query()
-            ->whereBetween('published_at', [$start, $end])
-            ->selectRaw('DATE(published_at) as day, COUNT(*) as total')
-            ->groupBy('day')
-            ->pluck('total', 'day');
+        if ($range === 'year') {
+            $jYear = $jNow->getYear();
+            $monthNames = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+            $months = collect(range(1, 12))->map(function (int $month) use ($jYear, $monthNames) {
+                $start = Jalalian::fromFormat('Y/m/d H:i:s', sprintf('%04d/%02d/01 00:00:00', $jYear, $month), new \DateTimeZone('Asia/Tehran'))->toCarbon();
+                $next = $month === 12
+                    ? Jalalian::fromFormat('Y/m/d H:i:s', sprintf('%04d/01/01 00:00:00', $jYear + 1), new \DateTimeZone('Asia/Tehran'))->toCarbon()
+                    : Jalalian::fromFormat('Y/m/d H:i:s', sprintf('%04d/%02d/01 00:00:00', $jYear, $month + 1), new \DateTimeZone('Asia/Tehran'))->toCarbon();
 
-        $chart = $daily->map(fn ($day) => [
-            'label' => $day->format('m/d'),
-            'count' => (int) ($countsByDate[$day->toDateString()] ?? 0),
-        ])->values();
+                return ['label' => $monthNames[$month - 1], 'start' => $start, 'end' => $next->copy()->subSecond()];
+            });
+            $start = $months->first()['start'];
+            $end = $jNow->toCarbon()->endOfDay();
+            $chart = $months->map(fn ($month) => [
+                'label' => $month['label'],
+                'count' => $month['start']->gt($end) ? 0 : SourceItem::query()->whereBetween('published_at', [$month['start'], $month['end']->gt($end) ? $end : $month['end']])->count(),
+            ])->values();
+        } else {
+            $days = 30;
+            $start = $now->copy()->subDays($days - 1)->startOfDay();
+            $end = $now->copy()->endOfDay();
+            $daily = collect(range($days - 1, 0))->map(fn (int $offset) => $now->copy()->subDays($offset));
+            $countsByDate = SourceItem::query()
+                ->whereBetween('published_at', [$start, $end])
+                ->selectRaw('DATE(published_at) as day, COUNT(*) as total')
+                ->groupBy('day')
+                ->pluck('total', 'day');
+            $chart = $daily->map(fn ($day) => [
+                'label' => Jalalian::fromCarbon($day)->format('m/d'),
+                'count' => (int) ($countsByDate[$day->toDateString()] ?? 0),
+            ])->values();
+        }
 
         $topSources = SourceItem::query()
             ->selectRaw('source_id, COUNT(*) as total')
@@ -86,7 +106,7 @@ class PanelController extends Controller
         $recentNews = SourceItem::query()->with(['source', 'category'])->latest('published_at')->limit(6)->get();
         $latestRun = MonitoringRun::query()->latest('started_at')->first();
 
-        return view('panel.index', compact('days', 'stats', 'chart', 'topSources', 'topKeywords', 'recentNews', 'latestRun'));
+        return view('panel.index', compact('range', 'stats', 'chart', 'topSources', 'topKeywords', 'recentNews', 'latestRun'));
     }
 
     public function news(Request $request)

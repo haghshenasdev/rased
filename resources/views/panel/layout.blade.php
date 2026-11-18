@@ -5,7 +5,6 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>@yield('title', 'داشبورد') | رصد</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -13,16 +12,19 @@
       *{font-family:Vazirmatn,Tahoma,sans-serif}body{background:#f4f7fb;background-image:radial-gradient(ellipse at 78% 0%,rgba(14,165,233,.08),transparent 28%),radial-gradient(ellipse at 0% 10%,rgba(16,185,129,.07),transparent 25%)}
       .glass{background:rgba(255,255,255,.8);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.95);box-shadow:0 12px 38px rgba(15,23,42,.045)}.gradient-bg{background:linear-gradient(125deg,#059669,#0284c7)}.nav-active{background:linear-gradient(100deg,rgba(5,150,105,.12),rgba(2,132,199,.08));color:#047857}
       .clamp-2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.clamp-3{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.news-card{transition:transform .2s,box-shadow .2s}.news-card:hover{transform:translateY(-3px);box-shadow:0 20px 50px rgba(15,23,42,.10)}
+      #panel-sidebar{transform:translateX(100%)}#mobile-menu-backdrop{display:none}body.mobile-menu-open{overflow:hidden}body.mobile-menu-open #panel-sidebar{transform:translateX(0)}body.mobile-menu-open #mobile-menu-backdrop{display:block}
+      @media(min-width:64rem){#panel-sidebar{transform:translateX(0)!important}#mobile-menu-backdrop{display:none!important}}
+      @media(max-width:639px){#panel-app table{display:block!important;width:100%!important;min-width:0!important}#panel-app table thead{display:none!important}#panel-app table tbody{display:block!important;width:100%!important}#panel-app table tbody tr{display:block!important;margin:0 0 .75rem!important;padding:.35rem .8rem!important;border:1px solid #e2e8f0!important;border-radius:1rem!important;background:#fff!important}#panel-app table tbody td{display:flex!important;align-items:flex-start;justify-content:space-between;gap:1rem;width:100%!important;max-width:none!important;padding:.7rem .15rem!important;border-bottom:1px solid #f1f5f9!important;text-align:right!important;white-space:normal!important}#panel-app table tbody td:last-child{border-bottom:0!important}#panel-app table tbody td:before{content:attr(data-label);flex:0 0 34%;color:#64748b;font-size:.72rem;font-weight:800}#panel-app table tbody td[colspan]:before{content:none}}
     </style>
 </head>
 <body class="min-h-screen text-slate-800">
 <div id="panel-app" class="min-h-screen">
   @php($activeSection = request()->segment(3))
-  <div v-if="mobileOpen" class="fixed inset-0 z-40 bg-slate-950/35 lg:hidden" v-on:click="mobileOpen=false"></div>
-  <aside class="fixed inset-y-0 right-0 z-50 flex w-[276px] translate-x-full flex-col border-l border-slate-200/70 bg-white/95 p-4 shadow-2xl transition-transform lg:translate-x-0" v-bind:class="{'translate-x-0':mobileOpen}">
+  <div id="mobile-menu-backdrop" class="fixed inset-0 z-40 bg-slate-950/35 lg:hidden"></div>
+  <aside id="panel-sidebar" class="fixed inset-y-0 right-0 z-50 flex w-[276px] flex-col border-l border-slate-200/70 bg-white/95 p-4 shadow-2xl transition-transform duration-300 lg:translate-x-0">
     <div class="flex items-center justify-between">
       <a href="{{ route('panel.index') }}" class="flex items-center gap-3 px-2 py-3"><span class="grid h-11 w-11 place-items-center rounded-2xl gradient-bg text-xl font-black text-white shadow-lg">ر</span><span><b class="text-lg font-black">رصد</b><small class="block text-[11px] text-slate-500">مرکز مدیریت رسانه</small></span></a>
-      <button type="button" class="grid h-9 w-9 place-items-center rounded-xl text-xl text-slate-500 hover:bg-slate-100 lg:hidden" v-on:click="mobileOpen=false" aria-label="بستن منو">×</button>
+      <button id="mobile-menu-close" type="button" class="grid h-9 w-9 place-items-center rounded-xl text-xl text-slate-500 hover:bg-slate-100 lg:hidden" aria-label="بستن منو">×</button>
     </div>
     <div class="mt-5 rounded-2xl bg-slate-50 px-3 py-3"><div class="flex items-center gap-3"><span class="grid h-10 w-10 place-items-center rounded-xl bg-emerald-100 font-black text-emerald-800">{{ mb_substr(auth()->user()->name ?? 'م', 0, 1) }}</span><span class="min-w-0"><b class="block truncate text-sm">{{ auth()->user()->name ?? 'مدیر سامانه' }}</b><small class="text-xs text-slate-500">مدیر سامانه</small></span><span class="mr-auto h-2 w-2 rounded-full bg-emerald-500"></span></div></div>
     <nav class="mt-6 flex-1 space-y-1 overflow-y-auto text-sm">
@@ -45,13 +47,21 @@
   </aside>
   <div class="min-h-screen lg:pr-[276px]">
     <header class="sticky top-0 z-30 border-b border-white/80 bg-white/75 backdrop-blur-xl"><div class="mx-auto flex max-w-[1600px] items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
-      <div class="flex items-center gap-3"><button type="button" class="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-lg lg:hidden" v-on:click="mobileOpen=true" aria-label="باز کردن منو">☰</button><div><p class="text-[11px] font-bold text-slate-400">پنل مدیریت / @yield('crumb','داشبورد')</p><h1 class="mt-0.5 text-lg font-black sm:text-xl">@yield('heading','داشبورد')</h1></div></div>
+      <div class="flex items-center gap-3"><button id="mobile-menu-open" type="button" class="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-lg lg:hidden" aria-label="باز کردن منو" aria-controls="panel-sidebar" aria-expanded="false">☰</button><div><p class="text-[11px] font-bold text-slate-400">پنل مدیریت / @yield('crumb','داشبورد')</p><h1 class="mt-0.5 text-lg font-black sm:text-xl">@yield('heading','داشبورد')</h1></div></div>
       <div class="flex items-center gap-2"><a href="{{ route('news.index') }}" class="hidden rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:border-emerald-300 sm:inline-flex">اخبار عمومی</a><span class="hidden h-9 w-px bg-slate-200 sm:block"></span><div class="flex items-center gap-2"><span class="hidden text-left text-xs sm:block"><b class="block">{{ auth()->user()->name ?? 'مدیر' }}</b><small class="text-slate-400">وضعیت سامانه: فعال</small></span><span class="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-emerald-100 to-sky-100 font-black text-emerald-800">{{ mb_substr(auth()->user()->name ?? 'م', 0, 1) }}</span></div></div>
     </div></header>
     <main class="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">@yield('content')</main>
   </div>
 </div>
-<script>const panelVue=Vue.createApp({data(){return{mobileOpen:false}}});panelVue.mount('#panel-app');</script>
+<script>
+(()=>{
+  const open=document.getElementById('mobile-menu-open'),close=document.getElementById('mobile-menu-close'),backdrop=document.getElementById('mobile-menu-backdrop');
+  const setMenu=(shown)=>{document.body.classList.toggle('mobile-menu-open',shown);open?.setAttribute('aria-expanded',shown?'true':'false')};
+  open?.addEventListener('click',()=>setMenu(true));close?.addEventListener('click',()=>setMenu(false));backdrop?.addEventListener('click',()=>setMenu(false));
+  document.querySelectorAll('#panel-sidebar nav a').forEach(link=>link.addEventListener('click',()=>setMenu(false)));
+  document.querySelectorAll('#panel-app table').forEach(table=>{const headers=[...table.querySelectorAll('thead th')].map(cell=>cell.textContent.trim());table.querySelectorAll('tbody tr').forEach(row=>[...row.querySelectorAll('td')].forEach((cell,index)=>{if(!cell.hasAttribute('colspan'))cell.setAttribute('data-label',headers[index]||'')}))});
+})();
+</script>
 @stack('scripts')
 </body>
 </html>
