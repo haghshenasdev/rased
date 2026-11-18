@@ -18,9 +18,12 @@
 <body class="min-h-screen text-slate-800">
 <div id="panel-app" class="min-h-screen">
   @php($activeSection = request()->segment(3))
-  <div v-if="mobileOpen" class="fixed inset-0 z-40 bg-slate-950/35 lg:hidden" @click="mobileOpen=false"></div>
-  <aside class="fixed inset-y-0 right-0 z-50 flex w-[276px] -translate-x-full flex-col border-l border-slate-200/70 bg-white/95 p-4 shadow-2xl transition-transform lg:translate-x-0" :class="{'translate-x-0':mobileOpen}">
-    <a href="{{ route('panel.index') }}" class="flex items-center gap-3 px-2 py-3"><span class="grid h-11 w-11 place-items-center rounded-2xl gradient-bg text-xl font-black text-white shadow-lg">ر</span><span><b class="text-lg font-black">رصد</b><small class="block text-[11px] text-slate-500">مرکز مدیریت رسانه</small></span></a>
+  <div v-if="mobileOpen" class="fixed inset-0 z-40 bg-slate-950/35 lg:hidden" v-on:click="mobileOpen=false"></div>
+  <aside class="fixed inset-y-0 right-0 z-50 flex w-[276px] translate-x-full flex-col border-l border-slate-200/70 bg-white/95 p-4 shadow-2xl transition-transform lg:translate-x-0" v-bind:class="{'translate-x-0':mobileOpen}">
+    <div class="flex items-center justify-between">
+      <a href="{{ route('panel.index') }}" class="flex items-center gap-3 px-2 py-3"><span class="grid h-11 w-11 place-items-center rounded-2xl gradient-bg text-xl font-black text-white shadow-lg">ر</span><span><b class="text-lg font-black">رصد</b><small class="block text-[11px] text-slate-500">مرکز مدیریت رسانه</small></span></a>
+      <button type="button" class="grid h-9 w-9 place-items-center rounded-xl text-xl text-slate-500 hover:bg-slate-100 lg:hidden" v-on:click="mobileOpen=false" aria-label="بستن منو">×</button>
+    </div>
     <div class="mt-5 rounded-2xl bg-slate-50 px-3 py-3"><div class="flex items-center gap-3"><span class="grid h-10 w-10 place-items-center rounded-xl bg-emerald-100 font-black text-emerald-800">{{ mb_substr(auth()->user()->name ?? 'م', 0, 1) }}</span><span class="min-w-0"><b class="block truncate text-sm">{{ auth()->user()->name ?? 'مدیر سامانه' }}</b><small class="text-xs text-slate-500">مدیر سامانه</small></span><span class="mr-auto h-2 w-2 rounded-full bg-emerald-500"></span></div></div>
     <nav class="mt-6 flex-1 space-y-1 overflow-y-auto text-sm">
       <p class="px-3 pb-2 text-[10px] font-black tracking-wider text-slate-400">نمای کلی</p>
@@ -42,7 +45,7 @@
   </aside>
   <div class="min-h-screen lg:pr-[276px]">
     <header class="sticky top-0 z-30 border-b border-white/80 bg-white/75 backdrop-blur-xl"><div class="mx-auto flex max-w-[1600px] items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
-      <div class="flex items-center gap-3"><button class="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-lg lg:hidden" @click="mobileOpen=true" aria-label="باز کردن منو">☰</button><div><p class="text-[11px] font-bold text-slate-400">پنل مدیریت / @yield('crumb','داشبورد')</p><h1 class="mt-0.5 text-lg font-black sm:text-xl">@yield('heading','داشبورد')</h1></div></div>
+      <div class="flex items-center gap-3"><button type="button" class="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-lg lg:hidden" v-on:click="mobileOpen=true" aria-label="باز کردن منو">☰</button><div><p class="text-[11px] font-bold text-slate-400">پنل مدیریت / @yield('crumb','داشبورد')</p><h1 class="mt-0.5 text-lg font-black sm:text-xl">@yield('heading','داشبورد')</h1></div></div>
       <div class="flex items-center gap-2"><a href="{{ route('news.index') }}" class="hidden rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:border-emerald-300 sm:inline-flex">اخبار عمومی</a><span class="hidden h-9 w-px bg-slate-200 sm:block"></span><div class="flex items-center gap-2"><span class="hidden text-left text-xs sm:block"><b class="block">{{ auth()->user()->name ?? 'مدیر' }}</b><small class="text-slate-400">وضعیت سامانه: فعال</small></span><span class="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-emerald-100 to-sky-100 font-black text-emerald-800">{{ mb_substr(auth()->user()->name ?? 'م', 0, 1) }}</span></div></div>
     </div></header>
     <main class="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">@yield('content')</main>

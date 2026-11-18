@@ -1,10 +1,10 @@
 @extends('panel.layout')
-@php($editing = (bool) $record)
-@section('title', ($editing ? 'ویرایش ' : 'افزودن ').$config['title'])
+@section('title', ((bool) $record ? 'ویرایش ' : 'افزودن ').$config['title'])
 @section('crumb', $config['title'])
-@section('heading', ($editing ? 'ویرایش ' : 'افزودن ').$config['title'])
+@section('heading', ((bool) $record ? 'ویرایش ' : 'افزودن ').$config['title'])
 @section('content')
 @php
+  $editing = (bool) $record;
   $settings = is_array($record?->settings) ? $record->settings : [];
   $value = fn ($key, $default = null) => old($key, data_get($record, $key, $default));
   $checked = fn ($key, $default = true) => (bool) old($key, data_get($record, $key, $default));
