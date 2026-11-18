@@ -9,10 +9,29 @@ use App\Models\MonitoringLog;
 use App\Models\MonitoringRun;
 use App\Models\Source;
 use App\Models\SourceItem;
+use App\Jobs\CheckSourceJob;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class PanelController extends Controller
 {
+    public function logout(Request $request)
+    {
+        Auth::logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        return redirect()->route('home');
+    }
+
+    public function runMonitoring()
+    {
+        $sources = Source::query()->where('is_active', true)->get(['id']);
+        foreach ($sources as $source) CheckSourceJob::dispatch($source->id);
+
+        return back()->with('success', 'بررسی '.number_format($sources->count()).' منبع فعال در صف قرار گرفت.');
+    }
+
     public function index(Request $request)
     {
         $days = (int) $request->query('range', 7);

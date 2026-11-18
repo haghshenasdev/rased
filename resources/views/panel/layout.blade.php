@@ -17,6 +17,7 @@
 </head>
 <body class="min-h-screen text-slate-800">
 <div id="panel-app" class="min-h-screen">
+  @php($activeSection = request()->segment(3))
   <div v-if="mobileOpen" class="fixed inset-0 z-40 bg-slate-950/35 lg:hidden" @click="mobileOpen=false"></div>
   <aside class="fixed inset-y-0 right-0 z-50 flex w-[276px] -translate-x-full flex-col border-l border-slate-200/70 bg-white/95 p-4 shadow-2xl transition-transform lg:translate-x-0" :class="{'translate-x-0':mobileOpen}">
     <a href="{{ route('panel.index') }}" class="flex items-center gap-3 px-2 py-3"><span class="grid h-11 w-11 place-items-center rounded-2xl gradient-bg text-xl font-black text-white shadow-lg">ر</span><span><b class="text-lg font-black">رصد</b><small class="block text-[11px] text-slate-500">مرکز مدیریت رسانه</small></span></a>
@@ -26,18 +27,18 @@
       <a href="{{ route('panel.index') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 font-bold {{ request()->routeIs('panel.index') ? 'nav-active' : 'text-slate-600 hover:bg-slate-50' }}"><span>▦</span> داشبورد</a>
       <a href="{{ route('panel.news') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 font-bold {{ request()->routeIs('panel.news') ? 'nav-active' : 'text-slate-600 hover:bg-slate-50' }}"><span>▤</span> خبرهای پیدا شده</a>
       <p class="px-3 pb-2 pt-6 text-[10px] font-black tracking-wider text-slate-400">مدیریت پایش</p>
-      <a href="{{ url('/admin/sources') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 text-slate-600 hover:bg-slate-50"><span>◉</span> منابع خبری</a>
-      <a href="{{ url('/admin/keywords') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 text-slate-600 hover:bg-slate-50"><span>⌕</span> کلیدواژه‌ها</a>
-      <a href="{{ url('/admin/blacklist-keywords') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 text-slate-600 hover:bg-slate-50"><span>⊘</span> واژه‌های مسدود</a>
-      <a href="{{ url('/admin/categories') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 text-slate-600 hover:bg-slate-50"><span>◫</span> دسته‌بندی‌ها</a>
+      <a href="{{ route('panel.manage.index', 'sources') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 {{ $activeSection==='sources' ? 'nav-active font-bold' : 'text-slate-600 hover:bg-slate-50' }}"><span>◉</span> منابع خبری</a>
+      <a href="{{ route('panel.manage.index', 'keywords') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 {{ $activeSection==='keywords' ? 'nav-active font-bold' : 'text-slate-600 hover:bg-slate-50' }}"><span>⌕</span> کلیدواژه‌ها</a>
+      <a href="{{ route('panel.manage.index', 'blacklist-keywords') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 {{ $activeSection==='blacklist-keywords' ? 'nav-active font-bold' : 'text-slate-600 hover:bg-slate-50' }}"><span>⊘</span> واژه‌های مسدود</a>
+      <a href="{{ route('panel.manage.index', 'categories') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 {{ $activeSection==='categories' ? 'nav-active font-bold' : 'text-slate-600 hover:bg-slate-50' }}"><span>◫</span> دسته‌بندی‌ها</a>
       <p class="px-3 pb-2 pt-6 text-[10px] font-black tracking-wider text-slate-400">عملیات و ارسال</p>
-      <a href="{{ url('/admin/monitoring-logs') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 text-slate-600 hover:bg-slate-50"><span>◷</span> گزارش پایش</a>
-      <a href="{{ url('/admin/queue-jobs') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 text-slate-600 hover:bg-slate-50"><span>↻</span> صف پردازش</a>
-      <a href="{{ url('/admin/bale-subscribers') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 text-slate-600 hover:bg-slate-50"><span>➤</span> مشترکان بله</a>
-      <a href="{{ url('/admin/bale-bot-settings') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 text-slate-600 hover:bg-slate-50"><span>⚙</span> تنظیمات ربات</a>
-      <a href="{{ url('/admin/source-items') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 text-slate-600 hover:bg-slate-50"><span>☷</span> مدیریت همه خبرها</a>
+      <a href="{{ route('panel.manage.index', 'monitoring-logs') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 {{ $activeSection==='monitoring-logs' ? 'nav-active font-bold' : 'text-slate-600 hover:bg-slate-50' }}"><span>◷</span> کنسول لاگ‌ها</a>
+      <a href="{{ route('panel.manage.index', 'queue-jobs') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 {{ $activeSection==='queue-jobs' ? 'nav-active font-bold' : 'text-slate-600 hover:bg-slate-50' }}"><span>↻</span> صف پردازش</a>
+      <a href="{{ route('panel.manage.index', 'bale-subscribers') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 {{ $activeSection==='bale-subscribers' ? 'nav-active font-bold' : 'text-slate-600 hover:bg-slate-50' }}"><span>➤</span> مشترکان بله</a>
+      <a href="{{ route('panel.bale-settings') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 {{ request()->routeIs('panel.bale-settings') ? 'nav-active font-bold' : 'text-slate-600 hover:bg-slate-50' }}"><span>⚙</span> تنظیمات ربات</a>
+      <a href="{{ route('panel.manage.index', 'source-items') }}" class="flex items-center gap-3 rounded-xl px-3 py-3 {{ $activeSection==='source-items' ? 'nav-active font-bold' : 'text-slate-600 hover:bg-slate-50' }}"><span>☷</span> مدیریت همه خبرها</a>
     </nav>
-    <div class="border-t border-slate-100 pt-3"><a href="{{ route('home') }}" class="flex items-center justify-between rounded-xl px-3 py-3 text-xs font-bold text-slate-500 hover:bg-slate-50"><span>مشاهده‌ی سایت عمومی</span><span>↗</span></a><a href="{{ url('/admin') }}" class="mt-1 flex items-center justify-between rounded-xl px-3 py-3 text-xs font-bold text-emerald-700 hover:bg-emerald-50"><span>ورود به پنل Filament</span><span>↗</span></a></div>
+    <div class="border-t border-slate-100 pt-3"><a href="{{ route('home') }}" class="flex items-center justify-between rounded-xl px-3 py-3 text-xs font-bold text-slate-500 hover:bg-slate-50"><span>مشاهده‌ی سایت عمومی</span><span>↗</span></a><form method="POST" action="{{ route('panel.logout') }}">@csrf<button class="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-3 text-xs font-bold text-rose-600 hover:bg-rose-50"><span>خروج از پنل</span><span>↗</span></button></form></div>
   </aside>
   <div class="min-h-screen lg:pr-[276px]">
     <header class="sticky top-0 z-30 border-b border-white/80 bg-white/75 backdrop-blur-xl"><div class="mx-auto flex max-w-[1600px] items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">

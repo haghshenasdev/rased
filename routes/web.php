@@ -111,7 +111,23 @@ Route::get('/news', [HomeController::class, 'index'])->name('news.index');
 
 Route::middleware('auth')->prefix('panel')->name('panel.')->group(function () {
     Route::get('/', [\App\Http\Controllers\PanelController::class, 'index'])->name('index');
+    Route::post('/logout', [\App\Http\Controllers\PanelController::class, 'logout'])->name('logout');
     Route::get('/news', [\App\Http\Controllers\PanelController::class, 'news'])->name('news');
+    Route::post('/monitoring/run', [\App\Http\Controllers\PanelController::class, 'runMonitoring'])->name('monitoring.run');
+    Route::get('/bale-settings', [\App\Http\Controllers\PanelBaleSettingsController::class, 'index'])->name('bale-settings');
+    Route::post('/bale-settings/webhook', [\App\Http\Controllers\PanelBaleSettingsController::class, 'setWebhook'])->name('bale-settings.webhook');
+    Route::delete('/bale-settings/webhook', [\App\Http\Controllers\PanelBaleSettingsController::class, 'deleteWebhook'])->name('bale-settings.webhook.delete');
+    Route::post('/bale-settings/test-message', [\App\Http\Controllers\PanelBaleSettingsController::class, 'testMessage'])->name('bale-settings.test-message');
+    Route::get('/manage/{section}', [\App\Http\Controllers\PanelManagementController::class, 'index'])->name('manage.index');
+    Route::get('/manage/{section}/create', [\App\Http\Controllers\PanelManagementController::class, 'create'])->name('manage.create');
+    Route::post('/manage/{section}', [\App\Http\Controllers\PanelManagementController::class, 'store'])->name('manage.store');
+    Route::post('/manage/sources/{record}/check', [\App\Http\Controllers\PanelManagementController::class, 'checkSource'])->whereNumber('record')->name('manage.sources.check');
+    Route::post('/manage/sources/{record}/test', [\App\Http\Controllers\PanelManagementController::class, 'testSource'])->whereNumber('record')->name('manage.sources.test');
+    Route::get('/manage/source-items/{record}/send', [\App\Http\Controllers\PanelManagementController::class, 'sendForm'])->whereNumber('record')->name('manage.source-items.send-form');
+    Route::post('/manage/source-items/{record}/send', [\App\Http\Controllers\PanelManagementController::class, 'sendToSubscribers'])->whereNumber('record')->name('manage.source-items.send');
+    Route::get('/manage/{section}/{record}/edit', [\App\Http\Controllers\PanelManagementController::class, 'edit'])->whereNumber('record')->name('manage.edit');
+    Route::put('/manage/{section}/{record}', [\App\Http\Controllers\PanelManagementController::class, 'update'])->whereNumber('record')->name('manage.update');
+    Route::delete('/manage/{section}/{record}', [\App\Http\Controllers\PanelManagementController::class, 'destroy'])->whereNumber('record')->name('manage.destroy');
 });
 
 Route::get('/news/{sourceItem}', [
